@@ -24,8 +24,21 @@ model User {
   name      String?
   password  String
   role      String   @default("student")
+  mentorId  String?
   createdAt DateTime @default(now())
   stores    Store[]
+}
+
+// Zvací kódy pro mentoring. Mentor vygeneruje kód, student ho zadá a tím se připojí.
+model InviteCode {
+  code      String    @id
+  mentorId  String
+  note      String?
+  usedById  String?
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([mentorId])
 }
 
 // Per-user key-value úložiště. Každý "key" (např. tz:trades:v1) drží JSON blob.

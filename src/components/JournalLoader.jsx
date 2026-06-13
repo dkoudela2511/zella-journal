@@ -8,10 +8,10 @@ const Journal = dynamic(() => import("./Journal"), {
   loading: () => <div style={{ padding: 40, fontFamily: "Inter, sans-serif", color: "#6B7280" }}>Načítám deník…</div>,
 });
 
-export default function JournalLoader({ isAdmin = false }) {
+export default function JournalLoader({ isAdmin = false, enrolled = false, mentorName = null }) {
   return (
     <>
-      <Journal />
+      <Journal isAdmin={isAdmin} enrolled={enrolled} mentorName={mentorName} />
       <div style={{ position: "fixed", bottom: 16, right: 18, zIndex: 20, display: "flex", gap: 8 }}>
         {isAdmin && (
           <Link

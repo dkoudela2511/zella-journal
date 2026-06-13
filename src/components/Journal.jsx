@@ -4,6 +4,7 @@ import {
   Plus, Pencil, Trash2, X, Search, TrendingUp, TrendingDown, LayoutDashboard,
   BookOpen, CalendarDays, Layers, ChevronLeft, ChevronRight, Wallet, Target,
   ClipboardList, FileText, NotebookText, BarChart3, Check, ListChecks, Settings, Image as ImageIcon,
+  GraduationCap, Lock,
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine,
@@ -24,6 +25,8 @@ const NB_KEY = "tz:notebook:v1";
 const P_KEY = "tz:progress:v1";
 const A_KEY = "tz:accounts:v1";
 const D_KEY = "tz:dashmode:v1";
+const MP_KEY = "tz:mentor:plans:v1";
+const MT_KEY = "tz:mentor:trades:v1";
 
 const IMPORT_FIELDS = [
   { key: "date", label: "Datum / čas" },
@@ -421,7 +424,7 @@ const pctColor = (p) => (p >= 80 ? "#16C784" : p >= 50 ? "#F59E0B" : "#F0454E");
 const bandLevel = (p) => (p >= 100 ? 4 : p >= 67 ? 3 : p >= 34 ? 2 : p > 0 ? 1 : 0);
 
 /* ================================================================== */
-export default function App() {
+export default function App({ isAdmin = false, enrolled: enrolledProp = false, mentorName: mentorNameProp = null }) {
   const [trades, setTrades] = useState([]);
   const [frameworks, setFrameworks] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -443,6 +446,13 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [fwFilter, setFwFilter] = useState("");
   const [dirFilter, setDirFilter] = useState("");
+  // mentoring
+  const [enrolled, setEnrolled] = useState(enrolledProp);
+  const [mentorName, setMentorName] = useState(mentorNameProp);
+  const [mentorPlans, setMentorPlans] = useState({});
+  const [mentorTrades, setMentorTrades] = useState([]);
+  const [mentorTab, setMentorTab] = useState("plans");
+  const [editingMTrade, setEditingMTrade] = useState(null);
 
   /* načtení + migrace setup -> framework + účty */
   useEffect(() => {
@@ -499,6 +509,43 @@ export default function App() {
 
   const persistT = useCallback((next) => { setTrades(next); store.set(T_KEY, JSON.stringify(next)); }, []);
   const persistF = useCallback((next) => { setFrameworks(next); store.set(F_KEY, JSON.stringify(next)); }, []);
+
+  // mentoring: načtení dat, když je student zapsaný
+  useEffect(() => {
+    if (!enrolled) return;
+    (async () => {
+      try { setMentorPlans(JSON.parse((await store.get(MP_KEY)) || "{}") || {}); } catch {}
+      try { setMentorTrades(JSON.parse((await store.get(MT_KEY)) || "[]") || []); } catch {}
+    })();
+  }, [enrolled]);
+
+  const persistMentorPlans = useCallback((next) => { setMentorPlans(next); store.set(MP_KEY, JSON.stringify(next)); }, []);
+  const persistMentorTrades = useCallback((next) => { setMentorTrades(next); store.set(MT_KEY, JSON.stringify(next)); }, []);
+
+  const saveMentorPlan = (dayKey, patch) => {
+    const next = { ...mentorPlans, [dayKey]: { ...(mentorPlans[dayKey] || {}), ...patch } };
+    persistMentorPlans(next);
+  };
+  const newMentorPlanDay = () => {
+    const k = new Date().toISOString().slice(0, 10);
+    if (!mentorPlans[k]) persistMentorPlans({ ...mentorPlans, [k]: { adherence: "" } });
+  };
+  const saveMentorTrade = (t) => {
+    const exists = mentorTrades.some((x) => x.id === t.id);
+    persistMentorTrades(exists ? mentorTrades.map((x) => (x.id === t.id ? t : x)) : [t, ...mentorTrades]);
+    setEditingMTrade(null);
+  };
+  const deleteMentorTrade = (id) => { if (window.confirm("Smazat dozorovaný obchod?")) persistMentorTrades(mentorTrades.filter((x) => x.id !== id)); };
+
+  const redeemCode = async (code) => {
+    try {
+      const r = await fetch("/api/mentor/redeem", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return { error: d.error || "Nepodařilo se připojit." };
+      setEnrolled(true); setMentorName(d.mentorName || "Mentor");
+      return { ok: true };
+    } catch { return { error: "Chyba spojení." }; }
+  };
 
   const switchAccount = (id) => { setActiveAcc(id); store.set(A_KEY, JSON.stringify({ accounts, activeId: id })); };
   const saveAccounts = (next) => {
@@ -651,6 +698,7 @@ export default function App() {
     { id: "calendar", label: "Kalendář", icon: CalendarDays },
     { id: "frameworks", label: "Playbooks", icon: Layers },
     { id: "progress", label: "Progress", icon: ListChecks },
+    ...(!isAdmin ? [{ id: "mentoring", label: "Mentoring", icon: enrolled ? GraduationCap : Lock }] : []),
   ];
 
   return (
@@ -684,7 +732,7 @@ export default function App() {
         </header>
 
         {!loaded ? <div className="empty">Načítám…</div>
-          : trades.length === 0 && view !== "frameworks" && view !== "dailyjournal" && view !== "notebook" && view !== "progress" ? <EmptyState onAdd={() => setEditing(newTrade())} onImport={() => setEditingImport(true)} />
+          : trades.length === 0 && view !== "frameworks" && view !== "dailyjournal" && view !== "notebook" && view !== "progress" && view !== "mentoring" ? <EmptyState onAdd={() => setEditing(newTrade())} onImport={() => setEditingImport(true)} />
           : view === "dashboard" ? <Dashboard stats={stats} trades={realTrades} cur={cur} fwById={fwById} onAdd={() => setEditing(newTrade())} mode={dashMode} onMode={changeDashMode} />
           : view === "dailyjournal" ? (
             <DailyJournalView trades={realTrades} fwById={fwById} cur={cur} notes={dailyNotes} onSaveNote={saveNote} onEditTrade={(t) => setEditing({ ...t })} onAdd={() => setEditing(newTrade())} />
@@ -709,6 +757,15 @@ export default function App() {
           : view === "reports" ? <ReportsView trades={realTrades} frameworks={frameworks} fwById={fwById} cur={cur} />
           : view === "frameworks" ? <FrameworksView frameworks={frameworks} trades={accountTrades} cur={cur}
               onNew={() => setEditingFw(blankFw())} onEdit={(f) => setEditingFw({ ...f })} onDelete={deleteFramework} />
+          : view === "mentoring" ? (
+            !enrolled ? <RedeemScreen onRedeem={redeemCode} />
+            : <MentoringView
+                plans={mentorPlans} mtrades={mentorTrades} fwById={fwById} cur={cur} mentorName={mentorName}
+                tab={mentorTab} setTab={setMentorTab}
+                onSavePlan={saveMentorPlan} onNewPlanDay={newMentorPlanDay}
+                onAddTrade={() => setEditingMTrade({ ...blankTrade(), accountId: activeAcc })}
+                onEditTrade={(t) => setEditingMTrade({ ...t })} onDeleteTrade={deleteMentorTrade} />
+          )
           : <ProgressView progress={progress} trades={realTrades} onToggle={toggleRuleDay} onEditRules={() => setEditingRules(true)} />}
       </div>
 
@@ -734,6 +791,11 @@ export default function App() {
       )}
       {editingImport && (
         <ImportForm onImport={importTrades} onImportNinja={importNinjaTrades} onCancel={() => setEditingImport(false)} />
+      )}
+      {editingMTrade && (
+        <TradeForm cur={cur} initial={editingMTrade} frameworks={frameworks}
+          onCancel={() => setEditingMTrade(null)} onSave={saveMentorTrade} onCreateFramework={createFramework}
+          onShowChart={(t) => setChartFor({ symbol: t.symbol, date: t.date })} />
       )}
       {chartFor && (
         <ChartModal symbol={chartFor.symbol} date={chartFor.date} onClose={() => setChartFor(null)} />
@@ -2039,6 +2101,186 @@ function EmptyState({ onAdd, onImport }) {
   );
 }
 
+function RedeemScreen({ onRedeem }) {
+  const [code, setCode] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!code.trim()) { setErr("Zadej kód od mentora."); return; }
+    setBusy(true); setErr("");
+    const r = await onRedeem(code.trim());
+    setBusy(false);
+    if (r?.error) setErr(r.error);
+  };
+  return (
+    <div className="mentor-lock">
+      <div className="card lock-card center">
+        <Lock size={26} />
+        <h2>Mentoring je uzamčený</h2>
+        <p>Tahle sekce je dostupná jen se zvacím kódem od tvého mentora. Jakmile ho dostaneš, zadej ho sem a odemkne se ti denní plán, dozorované obchody i zpětná vazba.</p>
+        <div className="lock-row">
+          <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="Např. AB3K-7XQ2" onKeyDown={(e) => e.key === "Enter" && submit()} />
+          <button className="btn primary" disabled={busy} onClick={submit}>{busy ? "Připojuji…" : "Připojit se"}</button>
+        </div>
+        {err && <div className="lock-err">{err}</div>}
+      </div>
+    </div>
+  );
+}
+
+const ADH_OPTS = [{ v: "yes", l: "Držel jsem plán" }, { v: "partial", l: "Částečně" }, { v: "no", l: "Nedržel" }];
+function adhLabel(v) { return v === "yes" ? "Držel plán" : v === "partial" ? "Částečně" : v === "no" ? "Nedržel" : ""; }
+
+function MentoringView({ plans, mtrades, fwById, cur, mentorName, tab, setTab, onSavePlan, onNewPlanDay, onAddTrade, onEditTrade, onDeleteTrade }) {
+  const planDays = useMemo(() => {
+    const keys = new Set(Object.keys(plans || {}));
+    mtrades.forEach((t) => { const k = dayKey(t.date); if (k) keys.add(k); });
+    keys.add(new Date().toISOString().slice(0, 10));
+    return [...keys].sort((a, b) => (a < b ? 1 : -1));
+  }, [plans, mtrades]);
+
+  const adh = useMemo(() => {
+    const c = { yes: 0, partial: 0, no: 0 };
+    Object.values(plans || {}).forEach((p) => { if (p && c[p.adherence] != null) c[p.adherence]++; });
+    return c;
+  }, [plans]);
+
+  const tradesByDay = useMemo(() => {
+    const m = {}; mtrades.forEach((t) => { const k = dayKey(t.date); (m[k] = m[k] || []).push(t); }); return m;
+  }, [mtrades]);
+
+  const s = computeStats(mtrades.filter((t) => !t.missed));
+
+  return (
+    <div className="stack mentoring">
+      <div className="mtr-head">
+        <div className="mtr-when">Mentoring{mentorName && <span className="mtr-mentor">Mentor: {mentorName}</span>}</div>
+        <div className="mtr-adh">
+          <span className="adh-chip yes">Držel: {adh.yes}</span>
+          <span className="adh-chip partial">Částečně: {adh.partial}</span>
+          <span className="adh-chip no">Nedržel: {adh.no}</span>
+        </div>
+      </div>
+
+      <div className="mtr-tabs">
+        <button className={tab === "plans" ? "on" : ""} onClick={() => setTab("plans")}>Denní plány</button>
+        <button className={tab === "trades" ? "on" : ""} onClick={() => setTab("trades")}>Dozorované obchody</button>
+      </div>
+
+      {tab === "plans" ? (
+        <>
+          <div className="mtr-bar"><button className="btn primary sm" onClick={onNewPlanDay}><Plus size={14} /> Nový denní plán (dnes)</button></div>
+          {planDays.map((dk) => (
+            <PlanCard key={dk} dk={dk} plan={plans[dk] || {}} dayTrades={tradesByDay[dk] || []} cur={cur} onSave={(patch) => onSavePlan(dk, patch)} />
+          ))}
+        </>
+      ) : (
+        <>
+          <div className="mtr-bar">
+            <div className="mtr-stats">
+              <span>Obchodů <b>{s.n}</b></span>
+              <span>Net <b className={s.net >= 0 ? "pos" : "neg"}>{s.n ? fmtMoney(s.net, cur) : "—"}</b></span>
+              <span>Win rate <b>{s.n ? `${fmtNum(s.winRate, 0)} %` : "—"}</b></span>
+            </div>
+            <button className="btn primary sm" onClick={onAddTrade}><Plus size={14} /> Přidat dozorovaný obchod</button>
+          </div>
+          {mtrades.length === 0 ? (
+            <div className="card empty-card center"><p>Zatím žádné dozorované obchody. Sem zapisuj jen obchody, které řešíš s mentorem — má je vidět odděleně od tvého osobního deníku.</p></div>
+          ) : (
+            <div className="card">
+              <table className="mtr-tbl">
+                <thead><tr><th>Datum</th><th>Symbol</th><th>Směr</th><th>Playbook</th><th className="r">P&L</th><th className="r">R</th><th></th></tr></thead>
+                <tbody>
+                  {[...mtrades].sort((a, b) => new Date(b.date) - new Date(a.date)).map((t) => {
+                    const p = computePnl(t), r = computeR(t), f = fwById[t.frameworkId];
+                    return (
+                      <tr key={t.id}>
+                        <td>{fmtDate(t.date)}</td>
+                        <td>{t.symbol || "—"}</td>
+                        <td><span className={`pill ${t.direction}`}>{t.direction === "long" ? "L" : "S"}</span></td>
+                        <td>{f ? <><i className="fdot" style={{ background: f.color }} />{f.name}</> : "—"}</td>
+                        <td className={`r ${p >= 0 ? "pos" : "neg"}`}>{fmtMoney(p, cur)}</td>
+                        <td className="r">{isFinite(r) ? `${fmtNum(r, 2)}R` : "—"}</td>
+                        <td className="r nowrap">
+                          <button className="ic-btn" onClick={() => onEditTrade(t)}><Pencil size={14} /></button>
+                          <button className="ic-btn" onClick={() => onDeleteTrade(t.id)}><Trash2 size={14} /></button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function PlanCard({ dk, plan, dayTrades, cur, onSave }) {
+  const [d, setD] = useState(plan);
+  useEffect(() => { setD(plan); }, [plan]);
+  const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
+  const dirty = JSON.stringify(d) !== JSON.stringify(plan);
+  const dt = new Date(dk + "T00:00:00");
+  const weekday = dt.toLocaleDateString("cs-CZ", { weekday: "long" });
+  const dateStr = dt.toLocaleDateString("cs-CZ", { day: "numeric", month: "long", year: "numeric" });
+  const dayPnl = dayTrades.filter((t) => !t.missed).reduce((a, t) => a + computePnl(t), 0);
+
+  return (
+    <div className="card plan-card">
+      <div className="plan-head">
+        <div className="plan-when"><span className="plan-wd">{weekday}</span><span className="plan-date">{dateStr}</span></div>
+        <div className="plan-head-r">
+          {dayTrades.length > 0 && <span className={`plan-pnl ${dayPnl >= 0 ? "pos" : "neg"}`}>{fmtMoney(dayPnl, cur)} · {dayTrades.length} obch.</span>}
+          {d.adherence && <span className={`adh-chip ${d.adherence}`}>{adhLabel(d.adherence)}</span>}
+        </div>
+      </div>
+
+      <div className="plan-grid">
+        <div className="plan-col">
+          <h4>📋 Plán (před trhem)</h4>
+          <label>Výhled / bias</label>
+          <textarea rows={2} value={d.bias || ""} onChange={set("bias")} placeholder="Kam to vidím, jaký mám bias…" />
+          <label>Klíčové úrovně / watchlist</label>
+          <textarea rows={2} value={d.levels || ""} onChange={set("levels")} placeholder="Supporty, resistance, co sleduju…" />
+          <label>Scénáře — co chci dělat a proč</label>
+          <textarea rows={3} value={d.scenarios || ""} onChange={set("scenarios")} placeholder="Když cena udělá X, udělám Y, protože…" />
+          <label>Screeny analýzy</label>
+          <ShotInput shots={d.planShots || []} onChange={(v) => setD({ ...d, planShots: v })} />
+        </div>
+        <div className="plan-col">
+          <h4>✅ Debrief (po trhu)</h4>
+          <label>Jak to dopadlo</label>
+          <textarea rows={2} value={d.outcome || ""} onChange={set("outcome")} placeholder="Co se dělo, jak jsem reagoval…" />
+          <label>Držel jsem se plánu?</label>
+          <div className="adh-pick">
+            {ADH_OPTS.map((o) => (
+              <button key={o.v} type="button" className={`adh-opt ${o.v} ${d.adherence === o.v ? "on" : ""}`} onClick={() => setD({ ...d, adherence: o.v })}>{o.l}</button>
+            ))}
+          </div>
+          <label>Co se povedlo / co příště jinak</label>
+          <textarea rows={3} value={d.lessons || ""} onChange={set("lessons")} placeholder="Plusy a poučení do příště…" />
+          <label>Screeny (po trhu)</label>
+          <ShotInput shots={d.debriefShots || []} onChange={(v) => setD({ ...d, debriefShots: v })} />
+        </div>
+      </div>
+
+      {plan.mentorComment && (
+        <div className="mentor-note">
+          <div className="mentor-note-h"><GraduationCap size={14} /> Komentář mentora</div>
+          <div className="mentor-note-b">{plan.mentorComment}</div>
+        </div>
+      )}
+
+      <div className="plan-foot">
+        {dirty ? <button className="btn primary sm" onClick={() => onSave(d)}>Uložit den</button> : <span className="plan-saved">Uloženo ✓</span>}
+      </div>
+    </div>
+  );
+}
+
 /* ========================= STYLES ========================= */
 function Style() {
   return (<style>{`
@@ -2335,6 +2577,59 @@ function Style() {
 .nt-badge{background:#E9FBF1;color:#0F9D58;border:1px solid #BFEFD4;border-radius:9px;padding:9px 13px;font-size:13px;margin-bottom:12px;}
 .empty-btns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;}
 .csv-more{padding:8px 11px;font-size:12px;color:var(--muted);}
+
+/* mentoring */
+.mentor-lock{display:flex;justify-content:center;padding:30px 0;}
+.lock-card{max-width:520px;}
+.lock-card h2{margin:10px 0 6px;font-size:19px;}
+.lock-card p{color:var(--soft);font-size:14px;line-height:1.55;margin-bottom:16px;}
+.lock-row{display:flex;gap:8px;width:100%;}
+.lock-row input{flex:1;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font-size:15px;letter-spacing:1px;text-transform:uppercase;font-family:inherit;}
+.lock-err{margin-top:10px;color:#F0454E;font-size:13px;}
+.mtr-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;}
+.mtr-when{font-size:15px;font-weight:700;display:flex;align-items:center;gap:10px;}
+.mtr-mentor{font-size:12px;font-weight:600;color:var(--muted);background:#F0EEFF;border:1px solid #E4DEFF;padding:3px 9px;border-radius:20px;}
+.mtr-adh{display:flex;gap:6px;flex-wrap:wrap;}
+.adh-chip{font-size:12px;font-weight:600;padding:3px 9px;border-radius:20px;border:1px solid var(--line);}
+.adh-chip.yes{background:#E9FBF1;color:#0F9D58;border-color:#BFEFD4;}
+.adh-chip.partial{background:#FFF6E6;color:#B7791F;border-color:#F3E0B5;}
+.adh-chip.no{background:#FDECEC;color:#E0414A;border-color:#F6CBCD;}
+.mtr-tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);}
+.mtr-tabs button{background:none;border:none;padding:9px 14px;font-family:inherit;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;}
+.mtr-tabs button.on{color:var(--text);border-bottom-color:#7C5CFC;}
+.mtr-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;}
+.mtr-stats{display:flex;gap:16px;font-size:13px;color:var(--soft);}
+.mtr-stats b{color:var(--text);}
+.btn.sm{padding:7px 12px;font-size:13px;}
+.plan-card{padding:0;overflow:hidden;}
+.plan-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line2);flex-wrap:wrap;gap:8px;}
+.plan-when{display:flex;flex-direction:column;}
+.plan-wd{font-weight:700;text-transform:capitalize;}
+.plan-date{font-size:12px;color:var(--muted);}
+.plan-head-r{display:flex;align-items:center;gap:8px;}
+.plan-pnl{font-weight:700;font-size:13px;}
+.plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:16px;}
+.plan-col h4{margin:0 0 10px;font-size:13px;color:var(--soft);}
+.plan-col label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;}
+.plan-col textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-family:inherit;font-size:13.5px;resize:vertical;line-height:1.5;}
+.adh-pick{display:flex;gap:6px;flex-wrap:wrap;}
+.adh-opt{padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;font-family:inherit;font-size:13px;font-weight:600;color:var(--soft);cursor:pointer;}
+.adh-opt.on.yes{background:#E9FBF1;color:#0F9D58;border-color:#0F9D58;}
+.adh-opt.on.partial{background:#FFF6E6;color:#B7791F;border-color:#B7791F;}
+.adh-opt.on.no{background:#FDECEC;color:#E0414A;border-color:#E0414A;}
+.mentor-note{margin:0 16px 14px;background:#F0EEFF;border:1px solid #E0D9FF;border-radius:10px;padding:11px 13px;}
+.mentor-note-h{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#5B43D6;margin-bottom:5px;}
+.mentor-note-b{font-size:13.5px;color:var(--text);line-height:1.55;white-space:pre-wrap;}
+.plan-foot{padding:0 16px 14px;display:flex;justify-content:flex-end;}
+.plan-saved{font-size:12.5px;color:#0F9D58;font-weight:600;}
+.mtr-tbl{width:100%;border-collapse:collapse;font-size:13.5px;}
+.mtr-tbl th{text-align:left;padding:10px 12px;color:var(--muted);font-weight:600;font-size:12px;border-bottom:1px solid var(--line);}
+.mtr-tbl td{padding:10px 12px;border-bottom:1px solid var(--line2);}
+.mtr-tbl th.r,.mtr-tbl td.r{text-align:right;}
+.mtr-tbl td.nowrap{white-space:nowrap;}
+.ic-btn{background:none;border:none;color:var(--muted);cursor:pointer;padding:4px;border-radius:6px;}
+.ic-btn:hover{background:var(--line2);color:var(--text);}
+@media(max-width:760px){.plan-grid{grid-template-columns:1fr;}}
 .sm-seg{padding:2px;}
 .sm-seg .seg-btn{padding:5px 11px;font-size:12px;}
 
