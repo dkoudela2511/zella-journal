@@ -1,0 +1,30 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String
+  createdAt DateTime @default(now())
+  stores    Store[]
+}
+
+// Per-user key-value úložiště. Každý "key" (např. tz:trades:v1) drží JSON blob.
+// Mapuje 1:1 na to, jak prototyp ukládal data — jen teď per uživatel a v DB.
+model Store {
+  id     String @id @default(cuid())
+  userId String
+  key    String
+  value  String @db.Text
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([userId])
+}
