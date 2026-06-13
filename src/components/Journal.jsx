@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Plus, Pencil, Trash2, X, Search, TrendingUp, TrendingDown, LayoutDashboard,
   BookOpen, CalendarDays, Layers, ChevronLeft, ChevronRight, Wallet, Target,
@@ -74,6 +74,73 @@ function guessMapping(cols) {
 }
 
 const FW_COLORS = ["#7C5CFC", "#16C784", "#F59E0B", "#EC4899", "#06B6D4", "#F0454E", "#8B5CF6", "#84CC16"];
+
+/* ---------- TradingView symbol mapping ---------- */
+const TV_FUT = {
+  ES: "CME_MINI:ES1!", MES: "CME_MINI:MES1!", NQ: "CME_MINI:NQ1!", MNQ: "CME_MINI:MNQ1!",
+  RTY: "CME_MINI:RTY1!", M2K: "CME_MINI:M2K1!", YM: "CBOT_MINI:YM1!", MYM: "CBOT_MINI:MYM1!",
+  CL: "NYMEX:CL1!", MCL: "NYMEX:MCL1!", GC: "COMEX:GC1!", MGC: "COMEX:MGC1!", SI: "COMEX:SI1!",
+  NG: "NYMEX:NG1!", ZB: "CBOT:ZB1!", ZN: "CBOT:ZN1!", ZC: "CBOT:ZC1!", ZS: "CBOT:ZS1!",
+  "6E": "CME:6E1!", "6B": "CME:6B1!", "6J": "CME:6J1!", "6A": "CME:6A1!",
+};
+const TV_FX = new Set(["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD", "EURGBP", "EURJPY", "GBPJPY", "AUDJPY", "EURCHF"]);
+function tvSymbol(raw) {
+  let s = (raw || "").toString().trim().toUpperCase();
+  if (!s) return "CME_MINI:ES1!";
+  if (s.includes(":")) return s;                 // už plný TV symbol (např. NASDAQ:AAPL)
+  if (TV_FUT[s]) return TV_FUT[s];               // futures kontrakty
+  if (TV_FX.has(s)) return "OANDA:" + s;         // forex
+  if (/USDT$/.test(s)) return "BINANCE:" + s;    // krypto (BTCUSDT…)
+  if (/^(BTC|ETH|SOL|XRP|ADA|DOGE|BNB)USD$/.test(s)) return "BINANCE:" + s.replace(/USD$/, "USDT");
+  return s;                                       // akcie – TradingView si poradí (AAPL, TSLA…)
+}
+
+function ChartModal({ symbol, date, onClose }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const host = ref.current;
+    if (!host) return;
+    host.innerHTML = "";
+    const widget = document.createElement("div");
+    widget.className = "tradingview-widget-container__widget";
+    widget.style.height = "100%";
+    widget.style.width = "100%";
+    host.appendChild(widget);
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.async = true;
+    script.innerHTML = JSON.stringify({
+      symbol: tvSymbol(symbol),
+      interval: "5",
+      timezone: "Europe/Prague",
+      theme: "light",
+      style: "1",
+      locale: "cs",
+      autosize: true,
+      allow_symbol_change: true,
+      withdateranges: true,
+      hide_side_toolbar: false,
+      calendar: false,
+    });
+    host.appendChild(script);
+    return () => { if (host) host.innerHTML = ""; };
+  }, [symbol]);
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet chart-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-h">
+          <h3>Graf — {symbol || "?"}{date ? ` · ${(date || "").slice(0, 10)}` : ""}</h3>
+          <button className="x" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="chart-body">
+          <div className="tradingview-widget-container" ref={ref} style={{ height: "100%", width: "100%" }} />
+        </div>
+        <div className="chart-note">Tip: vlevo nahoře v grafu lze změnit symbol nebo timeframe. Přes posun/„date range" se dostaneš na datum svého obchodu. Data dodává TradingView (zdarma).</div>
+      </div>
+    </div>
+  );
+}
 
 /* ---------- storage wrapper → backend API (per-user, DB-backed) ---------- */
 const store = {
@@ -280,6 +347,7 @@ export default function App() {
   const [activeAcc, setActiveAcc] = useState("");
   const [editingAccounts, setEditingAccounts] = useState(false);
   const [editingImport, setEditingImport] = useState(false);
+  const [chartFor, setChartFor] = useState(null);
   const [dashMode, setDashMode] = useState("$");
   const [dailyNotes, setDailyNotes] = useState({});
   const [notebook, setNotebook] = useState({ folders: [], notes: [] });
@@ -518,6 +586,7 @@ export default function App() {
               dirFilter={dirFilter} setDirFilter={setDirFilter}
               total={accountTrades.length} onEdit={(t) => setEditing({ ...t })} onDelete={deleteTrade}
               onImport={() => setEditingImport(true)}
+              onChart={(t) => setChartFor({ symbol: t.symbol, date: t.date })}
             />
           )
           : view === "notebook" ? (
@@ -535,7 +604,8 @@ export default function App() {
 
       {editing && (
         <TradeForm cur={cur} initial={editing} frameworks={frameworks}
-          onCancel={() => setEditing(null)} onSave={saveTrade} onCreateFramework={createFramework} />
+          onCancel={() => setEditing(null)} onSave={saveTrade} onCreateFramework={createFramework}
+          onShowChart={(t) => setChartFor({ symbol: t.symbol, date: t.date })} />
       )}
       {editingFw && (
         <FrameworkForm initial={editingFw} onCancel={() => setEditingFw(null)} onSave={saveFramework} />
@@ -554,6 +624,9 @@ export default function App() {
       )}
       {editingImport && (
         <ImportForm onImport={importTrades} onCancel={() => setEditingImport(false)} />
+      )}
+      {chartFor && (
+        <ChartModal symbol={chartFor.symbol} date={chartFor.date} onClose={() => setChartFor(null)} />
       )}
     </div>
   );
@@ -686,7 +759,7 @@ function EqTip({ active, payload, cur, isR }) {
 }
 
 /* ========================= JOURNAL ========================= */
-function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilter, setFwFilter, dirFilter, setDirFilter, total, onEdit, onDelete, onImport }) {
+function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilter, setFwFilter, dirFilter, setDirFilter, total, onEdit, onDelete, onImport, onChart }) {
   const sorted = useMemo(() => [...trades].sort((a, b) => new Date(b.date) - new Date(a.date)), [trades]);
   return (
     <div className="stack">
@@ -735,8 +808,9 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
                     <td className={`r n ${r === null ? "mut" : r >= 0 ? "pos" : "neg"}`}>{r === null ? "—" : `${r >= 0 ? "+" : ""}${fmtNum(r, 1)}R`}</td>
                     <td className={`r n strong ${t.missed ? "mut" : p >= 0 ? "pos" : "neg"}`}>{fmtMoney(p, cur)}</td>
                     <td className="act" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => onEdit(t)}><Pencil size={14} /></button>
-                      <button onClick={() => onDelete(t.id)}><Trash2 size={14} /></button>
+                      <button title="Graf" onClick={() => onChart(t)}><BarChart3 size={14} /></button>
+                      <button title="Upravit" onClick={() => onEdit(t)}><Pencil size={14} /></button>
+                      <button title="Smazat" onClick={() => onDelete(t.id)}><Trash2 size={14} /></button>
                     </td>
                   </tr>
                 );
@@ -1652,7 +1726,7 @@ function ImportForm({ onImport, onCancel }) {
   );
 }
 
-function TradeForm({ initial, onSave, onCancel, cur, frameworks, onCreateFramework }) {
+function TradeForm({ initial, onSave, onCancel, cur, frameworks, onCreateFramework, onShowChart }) {
   const [t, setT] = useState(initial);
   const [adding, setAdding] = useState(false);
   const [newFw, setNewFw] = useState("");
@@ -1670,7 +1744,15 @@ function TradeForm({ initial, onSave, onCancel, cur, frameworks, onCreateFramewo
   return (
     <div className="overlay" onClick={onCancel}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-h"><h3>{initial.symbol ? "Upravit obchod" : "Nový obchod"}</h3><button className="x" onClick={onCancel}><X size={18} /></button></div>
+        <div className="sheet-h">
+          <h3>{initial.symbol ? "Upravit obchod" : "Nový obchod"}</h3>
+          <div className="sheet-h-act">
+            {onShowChart && t.symbol.trim() && (
+              <button className="btn ghost sm" onClick={() => onShowChart(t)}><BarChart3 size={14} /> Graf</button>
+            )}
+            <button className="x" onClick={onCancel}><X size={18} /></button>
+          </div>
+        </div>
         <div className="sheet-b">
           <div className="dirtog">
             <button className={t.direction === "long" ? "on long" : ""} onClick={() => setT({ ...t, direction: "long" })}><TrendingUp size={15} /> Long</button>
@@ -2106,6 +2188,14 @@ function Style() {
 .eq-head{display:flex;align-items:center;justify-content:space-between;}
 .sm-seg{padding:2px;}
 .sm-seg .seg-btn{padding:5px 11px;font-size:12px;}
+
+/* chart modal */
+.sheet-h-act{display:flex;align-items:center;gap:10px;}
+.chart-sheet{width:min(1040px,96vw);max-width:96vw;height:min(80vh,720px);display:flex;flex-direction:column;}
+.chart-body{flex:1;min-height:0;padding:0 14px;}
+.chart-body .tradingview-widget-container{border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+.chart-note{padding:10px 16px 14px;font-size:11.5px;color:var(--muted);line-height:1.5;}
+.act button[title="Graf"]:hover{color:var(--accent);}
 
 /* calendar */
 .cal-card{padding:18px;}
