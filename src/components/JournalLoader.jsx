@@ -17,9 +17,9 @@ export default function JournalLoader({ isAdmin = false, enrolled = false, mento
           <Link
             href="/admin"
             style={{
-              background: "#7C5CFC", border: "1px solid #7C5CFC", borderRadius: 10,
+              background: "#17386F", border: "1px solid #17386F", borderRadius: 10,
               padding: "8px 14px", fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 600,
-              color: "#fff", cursor: "pointer", boxShadow: "0 4px 14px rgba(124,92,252,0.3)", textDecoration: "none",
+              color: "#fff", cursor: "pointer", boxShadow: "0 4px 14px rgba(14,30,66,0.28)", textDecoration: "none",
             }}
           >
             Mentor panel

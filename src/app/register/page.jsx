@@ -32,7 +32,7 @@ export default function RegisterPage() {
   return (
     <div className="auth-wrap">
       <div className="auth-card">
-        <div className="auth-brand"><span className="auth-mark">Z</span><span className="auth-name">Zella&nbsp;Journal</span></div>
+        <div className="auth-brand"><span className="auth-mark" /><span className="auth-name">REAL&nbsp;EDGE</span></div>
         <h1>Vytvoř účet</h1>
         <p className="sub">Začni budovat svůj trading deník.</p>
         {err && <div className="auth-err">{err}</div>}
