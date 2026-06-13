@@ -2181,15 +2181,6 @@ function TradeForm({ initial, onSave, onCancel, cur, frameworks, onCreateFramewo
             </Field>
           )}
 
-          {isAdmin && t.source === "manual" && (
-            <Field label="Ověření">
-              <label className="verif-check">
-                <input type="checkbox" checked={!!t.verified} onChange={() => setT({ ...t, verified: !t.verified })} />
-                <span>Ověřený obchod — počítat jako ověřený (reálný obchod doplněný ručně, např. kvůli výpadku platformy)</span>
-              </label>
-            </Field>
-          )}
-
           <Field label="Playbook / strategie">
             {!adding ? (
               <div className="fwrow">
@@ -2252,6 +2243,11 @@ function TradeForm({ initial, onSave, onCancel, cur, frameworks, onCreateFramewo
             <label className={`tgl ${t.missed ? "on miss" : ""}`}>
               <input type="checkbox" checked={t.missed} onChange={(e) => setT({ ...t, missed: e.target.checked })} /><span className="tgl-box">{t.missed && <Check size={12} />}</span>Zmeškaný obchod
             </label>
+            {isAdmin && t.source === "manual" && (
+              <label className={`tgl ${t.verified ? "on" : ""}`} title="Reálný obchod doplněný ručně (např. kvůli výpadku platformy) — počítat jako ověřený">
+                <input type="checkbox" checked={!!t.verified} onChange={(e) => setT({ ...t, verified: e.target.checked })} /><span className="tgl-box">{t.verified && <Check size={12} />}</span>Ověřený obchod
+              </label>
+            )}
           </div>
           {t.missed && <p className="hint-line">Zmeškaný obchod se počítá k playbooku, ale nevstupuje do P&L ani statistik.</p>}
 
