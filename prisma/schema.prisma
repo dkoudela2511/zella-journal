@@ -12,6 +12,7 @@ model User {
   email     String   @unique
   name      String?
   password  String
+  role      String   @default("student")
   createdAt DateTime @default(now())
   stores    Store[]
 }
