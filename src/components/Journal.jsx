@@ -100,8 +100,9 @@ function groupNinjaTrades(rows) {
     const dir = /short/i.test(r["Market pos."] || "") ? "short" : "long";
     const entry = ntNum(r["Entry price"]);
     const entryTime = String(r["Entry time"] || "");
-    const key = [root, dir, entryTime, entry].join("|");
-    if (!groups[key]) groups[key] = { root, dir, entry, entryTime, exitTime: String(r["Exit time"] || ""), qty: 0, exitSum: 0, profit: 0, fees: 0, mae: 0, mfe: 0, strategy: String(r["Strategy"] || "").trim() };
+    const account = String(r["Account"] || "").trim();
+    const key = [account, root, dir, entryTime, entry].join("|");
+    if (!groups[key]) groups[key] = { account, root, dir, entry, entryTime, exitTime: String(r["Exit time"] || ""), qty: 0, exitSum: 0, profit: 0, fees: 0, mae: 0, mfe: 0, strategy: String(r["Strategy"] || "").trim() };
     const g = groups[key];
     const qty = ntNum(r["Qty"]);
     g.qty += qty;
@@ -114,6 +115,7 @@ function groupNinjaTrades(rows) {
     if (et && ge && et > ge) g.exitTime = String(r["Exit time"]);
   });
   return Object.values(groups).map((g) => ({
+    account: g.account,
     symbol: g.root,
     direction: g.dir,
     quantity: g.qty ? String(g.qty) : "",
@@ -658,9 +660,28 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       if (!f) { f = { id: uid(), name: name.trim(), description: "", color: FW_COLORS[fws.length % FW_COLORS.length], rules: [] }; fws.push(f); fwByName[k] = f; }
       return f.id;
     };
+
+    // rozdělení podle účtu (sloupec Account z NinjaTraderu)
+    let accs = accounts.map((a) => ({ ...a }));
+    let accsDirty = false;
+    const resolveAcc = (brokerName) => {
+      const bn = (brokerName || "").trim();
+      if (!bn) return activeAcc;
+      let a = accs.find((x) => (x.ntAccount || "").trim() === bn);            // skrytá brokerská vazba
+      if (!a) {
+        a = accs.find((x) => (x.name || "").trim().toLowerCase() === bn.toLowerCase()); // shoda názvu
+        if (a && !a.ntAccount) { a.ntAccount = bn; accsDirty = true; }        // zapamatovat vazbu
+      }
+      if (a) return a.id;
+      const na = { id: uid(), name: bn, currency: "$", ntAccount: bn };       // založit nový účet
+      accs.push(na); accsDirty = true;
+      return na.id;
+    };
+
     const grouped = groupNinjaTrades(rawRows);
+    const byAcc = {};
     const made = grouped.map((g) => {
-      const t = blankTrade(); t.accountId = activeAcc;
+      const t = blankTrade(); t.accountId = resolveAcc(g.account);
       t.symbol = g.symbol; t.direction = g.direction; t.quantity = g.quantity;
       t.entryPrice = g.entryPrice; t.exitPrice = g.exitPrice;
       t.date = g.date ? toLocalInput(g.date) : toLocalInput(new Date());
@@ -668,11 +689,22 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       t.reviewed = false;
       if (g.strategy) t.frameworkId = getFw(g.strategy);
       t.source = "imported";
+      byAcc[t.accountId] = (byAcc[t.accountId] || 0) + 1;
       return t;
     });
     if (fws.length !== frameworks.length) persistF(fws);
+    const primaryAccId = Object.entries(byAcc).sort((a, b) => b[1] - a[1])[0]?.[0] || activeAcc;
+    if (accsDirty || primaryAccId !== activeAcc) {
+      setAccounts(accs); setActiveAcc(primaryAccId);
+      store.set(A_KEY, JSON.stringify({ accounts: accs, activeId: primaryAccId }));
+    }
     persistT([...trades, ...made]);
     setEditingImport(false);
+
+    const lines = Object.entries(byAcc).map(([id, n]) => { const a = accs.find((x) => x.id === id); return `• ${a ? a.name : "?"}: ${n} ${pluralObchod(n)}`; });
+    if (lines.length > 1) {
+      window.alert(`Naimportováno ${made.length} ${pluralObchod(made.length)} a rozděleno do ${lines.length} účtů:\n\n${lines.join("\n")}\n\nÚčty přepínáš vlevo dole, přejmenovat (např. na Trend / Break / Reverzal) je můžeš přes ozubené kolo.`);
+    }
     return made.length;
   };
 
@@ -1991,6 +2023,11 @@ function ImportForm({ onImport, onImportNinja, onCancel }) {
   const setMap = (field, col) => setMapping((m) => ({ ...m, [field]: col || undefined }));
   const ready = cols && rows.length > 0;
   const grouped = useMemo(() => (ninja ? groupNinjaTrades(rows) : []), [ninja, rows]);
+  const acctSplit = useMemo(() => {
+    const m = {};
+    grouped.forEach((g) => { const a = (g.account || "").trim(); if (a) m[a] = (m[a] || 0) + 1; });
+    return Object.entries(m).map(([name, n]) => ({ name, n }));
+  }, [grouped]);
   const preview = rows.slice(0, 4);
 
   return (
@@ -2000,7 +2037,7 @@ function ImportForm({ onImport, onImportNinja, onCancel }) {
         <div className="sheet-b">
           {!ready ? (
             <>
-              <p className="hint-line">Nahraj <b>export ze záložky Trades z NinjaTraderu</b> (pozná se sám a seskupí scale-outy do jednoho obchodu), nebo libovolné CSV z jiného nástroje. Obchody se přidají do aktivního účtu.</p>
+              <p className="hint-line">Nahraj <b>export ze záložky Trades z NinjaTraderu</b> (pozná se sám a seskupí scale-outy do jednoho obchodu), nebo libovolné CSV z jiného nástroje. NinjaTrader obchody se rozdělí do účtů podle sloupce <i>Account</i> (chybějící účet appka založí); ostatní CSV jdou do aktivního účtu.</p>
               <label className="csv-drop">
                 <FileText size={26} />
                 <span>{err || "Vyber CSV soubor"}</span>
@@ -2013,6 +2050,12 @@ function ImportForm({ onImport, onImportNinja, onCancel }) {
               <div className="csv-file"><FileText size={15} /> {name}
                 <span className="muted">· {rows.length} řádků → <b>{grouped.length} {pluralObchod(grouped.length)}</b> po seskupení</span>
                 <button className="btn ghost sm" onClick={() => { setCols(null); setRows([]); setNinja(false); }}>Jiný soubor</button></div>
+              {acctSplit.length > 1 && (
+                <div className="acct-split-note">
+                  <b>Víc účtů v souboru</b> — obchody se rozdělí do účtů podle sloupce <i>Account</i>:
+                  <span className="acct-chips">{acctSplit.map((a) => <span className="acct-chip" key={a.name}>{a.name} · {a.n}</span>)}</span>
+                </div>
+              )}
               <div className="csv-prev">
                 <div className="csv-prev-h">Náhled (po seskupení podle vstupu)</div>
                 <table className="csv-table">
@@ -2073,7 +2116,7 @@ function ImportForm({ onImport, onImportNinja, onCancel }) {
         </div>
         <div className="sheet-f">
           <button className="btn ghost" onClick={onCancel}>Zrušit</button>
-          {ready && ninja && <button className="btn primary" onClick={() => onImportNinja(rows)}>Importovat {grouped.length} {pluralObchod(grouped.length)}</button>}
+          {ready && ninja && <button className="btn primary" onClick={() => onImportNinja(rows)}>Importovat {grouped.length} {pluralObchod(grouped.length)}{acctSplit.length > 1 ? ` → ${acctSplit.length} účtů` : ""}</button>}
           {ready && !ninja && <button className="btn primary" onClick={() => onImport(rows, mapping)}>Importovat {rows.length} {pluralObchod(rows.length)}</button>}
         </div>
       </div>
@@ -2766,6 +2809,10 @@ function Style() {
 
 .eq-head{display:flex;align-items:center;justify-content:space-between;}
 .nt-badge{background:#E9FBF1;color:#0F9D58;border:1px solid #BFEFD4;border-radius:9px;padding:9px 13px;font-size:13px;margin-bottom:12px;}
+.acct-split-note{background:var(--gold-soft);border:1px solid #E8D9A8;border-radius:9px;padding:10px 13px;font-size:13px;color:var(--text);margin:10px 0;line-height:1.5;}
+.acct-split-note i{font-style:normal;font-weight:600;}
+.acct-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;}
+.acct-chip{display:inline-block;background:var(--card);border:1px solid #E8D9A8;border-radius:7px;padding:3px 9px;font-size:12px;font-weight:600;}
 .empty-btns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;}
 .csv-more{padding:8px 11px;font-size:12px;color:var(--muted);}
 
