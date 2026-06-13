@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { summarize, instrumentMap } from "@/lib/stats";
 
 const SEEN_KEY = "tz:mentor:seen:v1";
+const TRUST_KEY = "tz:mentor:trust:v1";
 
 function genCode() {
   const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -21,6 +22,12 @@ async function requireAdmin() {
 
 async function getSeenMap(mentorId) {
   const row = await prisma.store.findUnique({ where: { userId_key: { userId: mentorId, key: SEEN_KEY } } });
+  if (!row) return {};
+  try { return JSON.parse(row.value) || {}; } catch { return {}; }
+}
+
+async function getTrustMap(mentorId) {
+  const row = await prisma.store.findUnique({ where: { userId_key: { userId: mentorId, key: TRUST_KEY } } });
   if (!row) return {};
   try { return JSON.parse(row.value) || {}; } catch { return {}; }
 }
@@ -54,6 +61,7 @@ export async function GET() {
   const plansByUser = {}; mpRows.forEach((r) => (plansByUser[r.userId] = r.value));
 
   const seen = await getSeenMap(me.id);
+  const trust = await getTrustMap(me.id);
   const instruments = await prisma.instrument.findMany();
   const instMap = instrumentMap(instruments);
 
@@ -68,7 +76,7 @@ export async function GET() {
     return {
       id: u.id, email: u.email, name: u.name, createdAt: u.createdAt,
       tradeCount: s.tradeCount, netPnl: s.netPnl, winRate: s.winRate,
-      planCount: plans.length, newPlans,
+      planCount: plans.length, newPlans, trusted: !!trust[u.id],
     };
   });
 
@@ -121,6 +129,20 @@ export async function POST(req) {
       create: { userId: me.id, key: SEEN_KEY, value: JSON.stringify(seen) },
     });
     return NextResponse.json({ ok: true });
+  }
+
+  if (action === "trust") {
+    if (!body.userId) return NextResponse.json({ error: "missing userId" }, { status: 400 });
+    const owns = await prisma.user.findFirst({ where: { id: body.userId, mentorId: me.id }, select: { id: true } });
+    if (!owns) return NextResponse.json({ error: "not your student" }, { status: 403 });
+    const trust = await getTrustMap(me.id);
+    if (body.trusted) trust[body.userId] = true; else delete trust[body.userId];
+    await prisma.store.upsert({
+      where: { userId_key: { userId: me.id, key: TRUST_KEY } },
+      update: { value: JSON.stringify(trust) },
+      create: { userId: me.id, key: TRUST_KEY, value: JSON.stringify(trust) },
+    });
+    return NextResponse.json({ ok: true, trusted: !!body.trusted });
   }
 
   return NextResponse.json({ error: "unknown action" }, { status: 400 });

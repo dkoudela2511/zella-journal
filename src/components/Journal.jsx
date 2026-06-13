@@ -449,12 +449,21 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
   // mentoring
   const [enrolled, setEnrolled] = useState(enrolledProp);
   const [mentorName, setMentorName] = useState(mentorNameProp);
+  const [trusted, setTrusted] = useState(false);
   const [mentorPlans, setMentorPlans] = useState([]);
   const [mentorTrades, setMentorTrades] = useState([]);
   const [mentorTab, setMentorTab] = useState("plans");
   const [editingMTrade, setEditingMTrade] = useState(null);
   const [editingMImport, setEditingMImport] = useState(false);
   const [instrumentsList, setInstrumentsList] = useState([]);
+
+  /* zda mě mentor označil jako důvěryhodného (ztiší varování o ručních obchodech) */
+  useEffect(() => {
+    if (!enrolled) { setTrusted(false); return; }
+    let live = true;
+    fetch("/api/mentor/status").then((r) => r.json()).then((d) => { if (live) setTrusted(!!d.trusted); }).catch(() => {});
+    return () => { live = false; };
+  }, [enrolled]);
 
   /* načtení + migrace setup -> framework + účty */
   useEffect(() => {
@@ -773,7 +782,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       <Style />
       {/* sidebar */}
       <aside className="side">
-        <div className="brand"><img className="brand-logo" src="/real-edge-logo.png" alt="REAL EDGE" /></div>
+        <div className="brand"><img className="brand-logo" src="/real-edge-logo.png" alt="REAL EDGE" title="Obnovit" onClick={() => window.location.reload()} style={{ cursor: "pointer" }} /></div>
         <nav>
           {NAV.map((n) => (
             <button key={n.id} className={`nav-i ${view === n.id ? "on" : ""}`} onClick={() => setView(n.id)}>
@@ -800,13 +809,13 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
 
         {!loaded ? <div className="empty">Načítám…</div>
           : trades.length === 0 && view !== "frameworks" && view !== "dailyjournal" && view !== "notebook" && view !== "progress" && view !== "mentoring" ? <EmptyState onAdd={() => setEditing(newTrade())} onImport={() => setEditingImport(true)} />
-          : view === "dashboard" ? <Dashboard stats={stats} trades={realTrades} cur={cur} fwById={fwById} onAdd={() => setEditing(newTrade())} mode={dashMode} onMode={changeDashMode} />
+          : view === "dashboard" ? <Dashboard stats={stats} trades={realTrades} cur={cur} fwById={fwById} onAdd={() => setEditing(newTrade())} mode={dashMode} onMode={changeDashMode} trusted={trusted} />
           : view === "dailyjournal" ? (
-            <DailyJournalView trades={realTrades} fwById={fwById} cur={cur} notes={dailyNotes} onSaveNote={saveNote} onEditTrade={(t) => setEditing({ ...t })} onAdd={() => setEditing(newTrade())} />
+            <DailyJournalView trades={realTrades} fwById={fwById} cur={cur} notes={dailyNotes} onSaveNote={saveNote} onEditTrade={(t) => setEditing({ ...t })} onAdd={() => setEditing(newTrade())} isAdmin={isAdmin} />
           )
           : view === "journal" ? (
             <JournalView
-              trades={filtered} fwById={fwById} cur={cur} frameworks={frameworks}
+              trades={filtered} fwById={fwById} cur={cur} frameworks={frameworks} isAdmin={isAdmin}
               query={query} setQuery={setQuery} fwFilter={fwFilter} setFwFilter={setFwFilter}
               dirFilter={dirFilter} setDirFilter={setDirFilter}
               total={accountTrades.length} onEdit={(t) => setEditing({ ...t })} onDelete={deleteTrade}
@@ -875,7 +884,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
 }
 
 /* ========================= DASHBOARD ========================= */
-function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode }) {
+function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode, trusted }) {
   const score = overallScore(stats);
   const axes = scoreAxes(stats);
   const { curve } = useMemo(() => equityAndDD(trades), [trades]);
@@ -920,12 +929,12 @@ function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode }) {
 
   return (
     <div className="grid-dash">
-      <div className={`verif-strip ${verif.manual > 0 ? "warn" : "ok"}`}>
-        <div className="vs-ico">{verif.manual > 0 ? <AlertTriangle size={20} /> : <ShieldCheck size={20} />}</div>
+      <div className={`verif-strip ${verif.manual > 0 && !trusted ? "warn" : "ok"}`}>
+        <div className="vs-ico">{verif.manual > 0 && !trusted ? <AlertTriangle size={20} /> : <ShieldCheck size={20} />}</div>
         <div className="vs-main">
           <div className="vs-top">
-            <b>{verif.manual > 0 ? `${verif.manual} ${verif.manual === 1 ? "ruční obchod" : verif.manual <= 4 ? "ruční obchody" : "ručních obchodů"} v deníku` : "Všechny obchody ověřené importem"}</b>
-            <span className="vs-pctbig">{verif.pct} % ověřeno</span>
+            <b>{verif.manual > 0 && !trusted ? `${verif.manual} ${verif.manual === 1 ? "ruční obchod" : verif.manual <= 4 ? "ruční obchody" : "ručních obchodů"} v deníku` : "Všechny obchody ověřené"}</b>
+            <span className="vs-pctbig">{trusted ? "Ověřeno" : `${verif.pct} % ověřeno`}</span>
           </div>
           <div className="vs-stack">
             {verif.imported > 0 && <i className="seg-imp" style={{ width: `${(verif.imported / Math.max(1, verif.total)) * 100}%` }} />}
@@ -958,7 +967,7 @@ function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode }) {
         <Kpi label="Profit factor" value={stats.profitFactor === Infinity ? "∞" : fmtNum(stats.profitFactor)} />
         <Kpi label="Expectancy" value={expDisplay} tone={(isR ? avgR : stats.expectancy) >= 0 ? "pos" : "neg"} sub="na obchod" />
         <Kpi label="Max drawdown" value={fmtMoney(-stats.maxDD, cur)} tone="neg" />
-        <Kpi label="Prům. W/L" value={`${fmtMoney(stats.avgWin, cur)} / ${fmtMoney(-stats.avgLoss, cur)}`} />
+        <Kpi label="Prům. W/L" value={`${fmtMoney(stats.avgWin, cur)} / ${fmtMoney(-stats.avgLoss, cur)}`} sub={stats.avgLoss ? `RRR ${fmtNum(Math.abs(stats.avgWin / stats.avgLoss), 2)}` : "RRR —"} />
         {mm.avgMfe != null && <Kpi label="Ø MFE" value={fmtMoney(mm.avgMfe, cur)} tone="pos" sub="max pro tebe" />}
         {mm.avgMae != null && <Kpi label="Ø MAE" value={fmtMoney(-mm.avgMae, cur)} tone="neg" sub="max proti" />}
         {mm.eff != null && <Kpi label="Efektivita" value={`${fmtNum(mm.eff, 0)} %`} sub="z příznivého pohybu" />}
@@ -1044,7 +1053,7 @@ function EqTip({ active, payload, cur, isR }) {
 }
 
 /* ========================= JOURNAL ========================= */
-function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilter, setFwFilter, dirFilter, setDirFilter, total, onEdit, onDelete, onImport, onChart, onBulkDelete }) {
+function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilter, setFwFilter, dirFilter, setDirFilter, total, onEdit, onDelete, onImport, onChart, onBulkDelete, isAdmin }) {
   const sorted = useMemo(() => [...trades].sort((a, b) => new Date(b.date) - new Date(a.date)), [trades]);
   const [sel, setSel] = useState(() => new Set());
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -1095,8 +1104,9 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
             <tbody>
               {sorted.map((t) => {
                 const p = computePnl(t), r = computeR(t), f = fwById[t.frameworkId];
+                const editable = t.source === "manual" || isAdmin;
                 return (
-                  <tr key={t.id} className={`${t.missed ? "row-missed" : ""} ${sel.has(t.id) ? "row-sel" : ""} ${t.source === "manual" ? "" : "row-locked"}`} onClick={() => { if (t.source === "manual") onEdit(t); }}>
+                  <tr key={t.id} className={`${t.missed ? "row-missed" : ""} ${sel.has(t.id) ? "row-sel" : ""} ${editable ? "" : "row-locked"}`} onClick={() => { if (editable) onEdit(t); }}>
                     <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(t.id)} onChange={() => toggle(t.id)} /></td>
                     <td className="mut">{fmtDate(t.date)}</td>
                     <td className="sym">
@@ -1104,7 +1114,7 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
                       {t.reviewed && <Check size={13} className="rev-check" />}
                       {t.source === "manual"
                         ? <span className="src-badge man" title="Zadáno ručně"><Pencil size={11} /></span>
-                        : <span className="src-badge imp" title="Importováno z platformy — nelze editovat"><ShieldCheck size={11} /></span>}
+                        : <span className="src-badge imp" title={isAdmin ? "Importováno z platformy" : "Importováno z platformy — nelze editovat"}><ShieldCheck size={11} /></span>}
                     </td>
                     <td><span className={`dir ${t.direction}`}>{t.direction === "long" ? "LONG" : "SHORT"}</span></td>
                     <td>
@@ -1119,8 +1129,8 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
                     <td className={`r n strong ${t.missed ? "mut" : p >= 0 ? "pos" : "neg"}`}>{fmtMoney(p, cur)}</td>
                     <td className="act" onClick={(e) => e.stopPropagation()}>
                       <button title="Graf" onClick={() => onChart(t)}><BarChart3 size={14} /></button>
-                      {t.source === "manual"
-                        ? <button title="Upravit" onClick={() => onEdit(t)}><Pencil size={14} /></button>
+                      {editable
+                        ? <button title={t.source === "manual" ? "Upravit" : "Upravit (admin)"} onClick={() => onEdit(t)}><Pencil size={14} /></button>
                         : <button title="Importovaný obchod nelze editovat" className="locked-btn" disabled><Lock size={14} /></button>}
                       <button title="Smazat" onClick={() => onDelete(t.id)}><Trash2 size={14} /></button>
                     </td>
@@ -1136,7 +1146,7 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
 }
 
 /* ========================= DAILY JOURNAL ========================= */
-function DailyJournalView({ trades, fwById, cur, notes, onSaveNote, onEditTrade, onAdd }) {
+function DailyJournalView({ trades, fwById, cur, notes, onSaveNote, onEditTrade, onAdd, isAdmin }) {
   const days = useMemo(() => {
     const map = {};
     trades.forEach((t) => { const k = dayKey(t.date); if (!k) return; (map[k] = map[k] || []).push(t); });
@@ -1150,7 +1160,7 @@ function DailyJournalView({ trades, fwById, cur, notes, onSaveNote, onEditTrade,
       <p className="dj-intro">Den po dni: výsledky, obchody toho dne a tvoje poznámky (pre-market plán, recap, co se povedlo a co příště jinak).</p>
       {days.map((d) => (
         <DayCard key={d.key} dk={d.key} trades={d.trades} fwById={fwById} cur={cur}
-          note={notes[d.key] || ""} onSaveNote={onSaveNote} onEditTrade={onEditTrade} onAdd={onAdd} />
+          note={notes[d.key] || ""} onSaveNote={onSaveNote} onEditTrade={onEditTrade} onAdd={onAdd} isAdmin={isAdmin} />
       ))}
     </div>
   );
@@ -1172,7 +1182,7 @@ const DAY_TEMPLATE =
 📝 Recap dne:
 - `;
 
-function DayCard({ dk, trades, fwById, cur, note, onSaveNote, onEditTrade, onAdd }) {
+function DayCard({ dk, trades, fwById, cur, note, onSaveNote, onEditTrade, onAdd, isAdmin }) {
   const [draft, setDraft] = useState(note);
   useEffect(() => { setDraft(note); }, [note]);
 
@@ -1206,7 +1216,7 @@ function DayCard({ dk, trades, fwById, cur, note, onSaveNote, onEditTrade, onAdd
             {ordered.map((t) => {
               const p = computePnl(t), r = computeR(t), f = fwById[t.frameworkId];
               return (
-                <div className={`dt-row ${t.source === "manual" ? "" : "row-locked"}`} key={t.id} onClick={() => { if (t.source === "manual") onEditTrade(t); }}>
+                <div className={`dt-row ${t.source === "manual" || isAdmin ? "" : "row-locked"}`} key={t.id} onClick={() => { if (t.source === "manual" || isAdmin) onEditTrade(t); }}>
                   <span className={`pill ${t.direction}`}>{t.direction === "long" ? "L" : "S"}</span>
                   <span className="dt-time">{new Date(t.date).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}</span>
                   <span className="dt-sym">{t.symbol || "—"}</span>

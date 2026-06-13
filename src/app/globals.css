@@ -159,3 +159,5 @@ body {
 .pr-debrief { border-top: 0.5px solid #F2F3F7; padding-top: 12px; }
 .pr-shots.big { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
 .pr-shots.big img { width: 100%; max-width: 560px; max-height: 320px; object-fit: contain; background: #0E1320; border: 0.5px solid #E8EAF1; border-radius: 9px; cursor: zoom-in; }
+.trust-tog { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; font-size: 12px; color: #5C6275; }
+.trust-tog input { cursor: pointer; width: 15px; height: 15px; accent-color: #17386F; }

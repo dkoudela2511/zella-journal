@@ -52,6 +52,10 @@ export default function AdminPanel() {
     await fetch("/api/mentor", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "unenroll", userId }) });
     loadMentor();
   };
+  const setTrust = async (userId, trusted) => {
+    await fetch("/api/mentor", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "trust", userId, trusted }) });
+    loadMentor();
+  };
   const copy = (code) => {
     try { navigator.clipboard.writeText(code); setCopied(code); setTimeout(() => setCopied(""), 1500); } catch {}
   };
@@ -110,7 +114,7 @@ export default function AdminPanel() {
         ) : (
           <table className="admin-tbl">
             <thead>
-              <tr><th>Student</th><th className="r">Plánů</th><th className="r">Dozor. obchodů</th><th className="r">Net P&L</th><th className="r">Win rate</th><th></th></tr>
+              <tr><th>Student</th><th className="r">Plánů</th><th className="r">Dozor. obchodů</th><th className="r">Net P&L</th><th className="r">Win rate</th><th className="r">Důvěra</th><th></th></tr>
             </thead>
             <tbody>
               {students.map((u) => (
@@ -120,6 +124,12 @@ export default function AdminPanel() {
                   <td className="r">{u.tradeCount}</td>
                   <td className={`r ${u.netPnl >= 0 ? "pos" : "neg"}`}>{u.tradeCount ? money(u.netPnl) : "—"}</td>
                   <td className="r">{u.tradeCount ? `${u.winRate.toFixed(0)} %` : "—"}</td>
+                  <td className="r">
+                    <label className="trust-tog" title={u.trusted ? "Důvěryhodný — varování o ručních obchodech se mu nezobrazuje" : "Označit jako důvěryhodného (ztiší mu varování o ručních obchodech)"}>
+                      <input type="checkbox" checked={!!u.trusted} onChange={(e) => setTrust(u.id, e.target.checked)} />
+                      <span>{u.trusted ? "ano" : "—"}</span>
+                    </label>
+                  </td>
                   <td className="r nowrap">
                     <Link href={`/admin/student/${u.id}`} className="btn-view">Mentoring →</Link>
                     <button className="lnk del" onClick={() => unenroll(u.id)}>odebrat</button>
