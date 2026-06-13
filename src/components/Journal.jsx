@@ -810,6 +810,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
               query={query} setQuery={setQuery} fwFilter={fwFilter} setFwFilter={setFwFilter}
               dirFilter={dirFilter} setDirFilter={setDirFilter}
               total={accountTrades.length} onEdit={(t) => setEditing({ ...t })} onDelete={deleteTrade}
+              onBulkDelete={(ids) => persistT(trades.filter((t) => !ids.includes(t.id)))}
               onImport={() => setEditingImport(true)}
               onChart={(t) => setChartFor({ symbol: t.symbol, date: t.date })}
             />
@@ -900,7 +901,7 @@ function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode }) {
   // ověřené vs ruční + MAE/MFE
   const verif = useMemo(() => {
     let imported = 0, manual = 0;
-    trades.forEach((t) => { if (t.source === "imported") imported++; else manual++; });
+    trades.forEach((t) => { if (t.source === "manual") manual++; else imported++; });
     const total = imported + manual;
     return { imported, manual, total, pct: total ? Math.round((imported / total) * 100) : 100 };
   }, [trades]);
@@ -920,14 +921,20 @@ function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode }) {
   return (
     <div className="grid-dash">
       <div className={`verif-strip ${verif.manual > 0 ? "warn" : "ok"}`}>
-        {verif.manual > 0 ? <AlertTriangle size={18} /> : <ShieldCheck size={18} />}
-        <div className="vs-text">
-          <b>{verif.manual > 0 ? `Pozor — ${verif.manual} ${verif.manual === 1 ? "ruční obchod" : verif.manual <= 4 ? "ruční obchody" : "ručních obchodů"}` : "Vše ověřeno importem"}</b>
-          <span>{verif.imported} importovaných · {verif.manual} ručních</span>
-        </div>
-        <div className="vs-pct">
-          <span className="vs-bar"><i style={{ width: `${verif.pct}%` }} /></span>
-          <b>{verif.pct} % ověřeno</b>
+        <div className="vs-ico">{verif.manual > 0 ? <AlertTriangle size={20} /> : <ShieldCheck size={20} />}</div>
+        <div className="vs-main">
+          <div className="vs-top">
+            <b>{verif.manual > 0 ? `${verif.manual} ${verif.manual === 1 ? "ruční obchod" : verif.manual <= 4 ? "ruční obchody" : "ručních obchodů"} v deníku` : "Všechny obchody ověřené importem"}</b>
+            <span className="vs-pctbig">{verif.pct} % ověřeno</span>
+          </div>
+          <div className="vs-stack">
+            {verif.imported > 0 && <i className="seg-imp" style={{ width: `${(verif.imported / Math.max(1, verif.total)) * 100}%` }} />}
+            {verif.manual > 0 && <i className="seg-man" style={{ width: `${(verif.manual / Math.max(1, verif.total)) * 100}%` }} />}
+          </div>
+          <div className="vs-legend">
+            <span><i className="dot imp" /> {verif.imported} importovaných z platformy</span>
+            <span><i className="dot man" /> {verif.manual} ručních</span>
+          </div>
         </div>
       </div>
 
@@ -980,6 +987,8 @@ function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode }) {
           </AreaChart>
         </ResponsiveContainer>
       </div>
+
+      <div className="dash-cal"><CalendarView trades={trades} cur={cur} /></div>
 
       <div className="card recent-card">
         <div className="card-h">Poslední obchody</div>
@@ -1035,8 +1044,20 @@ function EqTip({ active, payload, cur, isR }) {
 }
 
 /* ========================= JOURNAL ========================= */
-function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilter, setFwFilter, dirFilter, setDirFilter, total, onEdit, onDelete, onImport, onChart }) {
+function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilter, setFwFilter, dirFilter, setDirFilter, total, onEdit, onDelete, onImport, onChart, onBulkDelete }) {
   const sorted = useMemo(() => [...trades].sort((a, b) => new Date(b.date) - new Date(a.date)), [trades]);
+  const [sel, setSel] = useState(() => new Set());
+  const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const allOn = sorted.length > 0 && sorted.every((t) => sel.has(t.id));
+  const toggleAll = () => setSel(() => (allOn ? new Set() : new Set(sorted.map((t) => t.id))));
+  const clearSel = () => setSel(new Set());
+  const bulkDelete = () => {
+    const ids = [...sel];
+    if (!ids.length) return;
+    if (window.confirm(`Opravdu smazat ${ids.length} ${ids.length === 1 ? "obchod" : ids.length <= 4 ? "obchody" : "obchodů"}? Tuhle akci nelze vrátit.`)) {
+      onBulkDelete(ids); clearSel();
+    }
+  };
   return (
     <div className="stack">
       <div className="filters">
@@ -1054,10 +1075,19 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
         <div className="count">{sorted.length} / {total}</div>
       </div>
 
+      {sel.size > 0 && (
+        <div className="bulk-bar">
+          <span><b>{sel.size}</b> vybráno</span>
+          <button className="btn ghost sm" onClick={clearSel}>Zrušit výběr</button>
+          <button className="btn danger sm" onClick={bulkDelete}><Trash2 size={14} /> Smazat vybrané</button>
+        </div>
+      )}
+
       <div className="card table-wrap">
         {sorted.length === 0 ? <div className="empty small">Žádný obchod neodpovídá filtru.</div> : (
           <table className="tbl">
             <thead><tr>
+              <th className="chk"><input type="checkbox" checked={allOn} onChange={toggleAll} title="Vybrat vše" /></th>
               <th>Datum</th><th>Symbol</th><th>Směr</th><th>Playbook</th>
               <th className="r">Vstup</th><th className="r">Výstup</th><th className="r">Velikost</th>
               <th className="r">R</th><th className="r">P&L</th><th></th>
@@ -1066,14 +1096,15 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
               {sorted.map((t) => {
                 const p = computePnl(t), r = computeR(t), f = fwById[t.frameworkId];
                 return (
-                  <tr key={t.id} className={t.missed ? "row-missed" : ""} onClick={() => onEdit(t)}>
+                  <tr key={t.id} className={`${t.missed ? "row-missed" : ""} ${sel.has(t.id) ? "row-sel" : ""}`} onClick={() => onEdit(t)}>
+                    <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(t.id)} onChange={() => toggle(t.id)} /></td>
                     <td className="mut">{fmtDate(t.date)}</td>
                     <td className="sym">
                       {t.symbol || "—"}
                       {t.reviewed && <Check size={13} className="rev-check" />}
-                      {t.source === "imported"
-                        ? <span className="src-badge imp" title="Importováno z platformy"><ShieldCheck size={11} /></span>
-                        : <span className="src-badge man" title="Zadáno ručně"><Pencil size={11} /></span>}
+                      {t.source === "manual"
+                        ? <span className="src-badge man" title="Zadáno ručně"><Pencil size={11} /></span>
+                        : <span className="src-badge imp" title="Importováno z platformy"><ShieldCheck size={11} /></span>}
                     </td>
                     <td><span className={`dir ${t.direction}`}>{t.direction === "long" ? "LONG" : "SHORT"}</span></td>
                     <td>
@@ -2488,7 +2519,8 @@ function Style() {
 .stack{padding:24px 28px;display:flex;flex-direction:column;gap:18px;}
 
 /* dashboard */
-.grid-dash{padding:24px 28px;display:grid;gap:18px;grid-template-columns:340px 1fr;grid-template-areas:'score kpis' 'equity equity' 'recent recent';}
+.grid-dash{padding:24px 28px;display:grid;gap:18px;grid-template-columns:340px 1fr;grid-template-areas:'verif verif' 'score kpis' 'equity equity' 'cal cal' 'recent recent';}
+.dash-cal{grid-area:cal;}
 .score-card{grid-area:score;}
 .kpis{grid-area:kpis;display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
 .equity-card{grid-area:equity;padding-bottom:14px;}
@@ -2784,18 +2816,33 @@ function Style() {
 .mtr-tbl td.nowrap{white-space:nowrap;}
 .ic-btn{background:none;border:none;color:var(--muted);cursor:pointer;padding:4px;border-radius:6px;}
 .ic-btn:hover{background:var(--line2);color:var(--text);}
-.verif-strip{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:12px;border:1px solid var(--line);background:var(--card);}
-.verif-strip.ok{border-color:#BFE6D2;background:#F1FBF6;color:#0F8A5A;}
-.verif-strip.warn{border-color:#F0DDB0;background:#FFF8EC;color:#9A6A12;}
-.verif-strip svg{flex-shrink:0;}
-.vs-text{display:flex;flex-direction:column;line-height:1.3;}
-.vs-text b{font-size:13.5px;}
-.vs-text span{font-size:12px;color:var(--soft);}
-.vs-pct{margin-left:auto;display:flex;align-items:center;gap:10px;}
-.vs-pct b{font-size:12.5px;white-space:nowrap;}
-.vs-bar{width:120px;height:7px;border-radius:5px;background:#E7EAF2;overflow:hidden;}
-.vs-bar i{display:block;height:100%;background:var(--gold);}
-.verif-strip.ok .vs-bar i{background:#16A06A;}
+.verif-strip{grid-area:verif;display:flex;align-items:center;gap:16px;padding:15px 18px;border-radius:14px;border:1px solid var(--line);background:var(--card);box-shadow:0 6px 18px rgba(20,25,50,.04);}
+.verif-strip.ok{border-color:#BFE6D2;}
+.verif-strip.warn{border-color:#F0DDB0;}
+.vs-ico{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;flex-shrink:0;}
+.verif-strip.ok .vs-ico{background:#E9F8F0;color:#0F8A5A;}
+.verif-strip.warn .vs-ico{background:#FCF3E0;color:#A6781A;}
+.vs-main{flex:1;min-width:0;}
+.vs-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:9px;flex-wrap:wrap;}
+.vs-top b{font-size:14px;}
+.vs-pctbig{font-size:15px;font-weight:700;white-space:nowrap;}
+.verif-strip.ok .vs-pctbig{color:#0F8A5A;}
+.verif-strip.warn .vs-pctbig{color:#A6781A;}
+.vs-stack{display:flex;height:10px;border-radius:6px;overflow:hidden;background:#EEF0F5;}
+.vs-stack i{display:block;height:100%;}
+.vs-stack .seg-imp{background:#16A06A;}
+.vs-stack .seg-man{background:#E0A92E;}
+.vs-legend{display:flex;gap:18px;margin-top:9px;font-size:12.5px;color:var(--soft);}
+.vs-legend .dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:middle;}
+.vs-legend .dot.imp{background:#16A06A;}
+.vs-legend .dot.man{background:#E0A92E;}
+.bulk-bar{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#FFF4F4;border:1px solid #F3CFCF;border-radius:11px;font-size:13px;}
+.bulk-bar b{color:var(--text);}
+.btn.danger{background:#E0414A;border-color:#E0414A;color:#fff;}
+.btn.danger:hover{background:#C8323B;}
+.tbl th.chk,.tbl td.chk{width:34px;text-align:center;padding-left:14px;}
+.tbl td.chk input,.tbl th.chk input{width:15px;height:15px;cursor:pointer;accent-color:var(--accent);}
+.tbl tr.row-sel{background:#F3F6FC;}
 .src-badge{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:5px;margin-left:6px;vertical-align:middle;}
 .src-badge.imp{background:#EAF4EF;color:#0F8A5A;}
 .src-badge.man{background:#F3F0E6;color:#A67C18;}
@@ -2955,7 +3002,7 @@ function Style() {
   .brand{padding:0;margin-right:8px;}.bname,.side-foot{display:none;}
   .side nav{flex-direction:row;overflow-x:auto;gap:4px;}
   .nav-i span{display:none;}.nav-i{padding:10px;}
-  .grid-dash{grid-template-columns:1fr;grid-template-areas:'score' 'kpis' 'equity' 'recent';}
+  .grid-dash{grid-template-columns:1fr;grid-template-areas:'verif' 'score' 'kpis' 'equity' 'cal' 'recent';}
   .kpis{grid-template-columns:repeat(2,1fr);}
   .cal-grid{grid-template-columns:repeat(7,1fr);}
   .cal-cell.week{display:none;}
