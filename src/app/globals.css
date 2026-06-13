@@ -88,3 +88,13 @@ body {
   .admin-tbl { font-size: 12px; }
   .admin-tbl th, .admin-tbl td { padding: 10px 10px; }
 }
+
+/* ===== Instrumenty (admin) ===== */
+.inst-form { padding: 18px; }
+.inst-grid { display: grid; grid-template-columns: 1fr 1.4fr 1fr 1fr 0.7fr; gap: 12px; }
+.inst-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; font-weight: 600; color: #6B7280; }
+.inst-grid input { border: 1px solid #E8EAF1; border-radius: 9px; padding: 9px 11px; font-size: 14px; font-family: inherit; outline: none; color: #1B1F2A; }
+.inst-grid input:focus { border-color: #7C5CFC; }
+.inst-grid input:disabled { background: #F5F6FB; color: #8A90A2; }
+.inst-actions { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 14px; }
+@media (max-width: 720px) { .inst-grid { grid-template-columns: 1fr 1fr; } }

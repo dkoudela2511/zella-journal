@@ -1,11 +1,11 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import JournalLoader from "@/components/JournalLoader";
+import InstrumentsAdmin from "@/components/InstrumentsAdmin";
 
-export default async function AppPage() {
+export default async function InstrumentsPage() {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
-  const isAdmin = session.user?.role === "admin";
-  return <JournalLoader isAdmin={isAdmin} />;
+  if (session.user?.role !== "admin") redirect("/app");
+  return <InstrumentsAdmin />;
 }

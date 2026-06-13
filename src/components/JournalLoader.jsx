@@ -1,20 +1,18 @@
 "use client";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { signOut, useSession } from "next-auth/react";
+import { signOut } from "next-auth/react";
 
 const Journal = dynamic(() => import("./Journal"), {
   ssr: false,
   loading: () => <div style={{ padding: 40, fontFamily: "Inter, sans-serif", color: "#6B7280" }}>Načítám deník…</div>,
 });
 
-export default function JournalLoader() {
-  const { data: session } = useSession();
-  const isAdmin = session?.user?.role === "admin";
+export default function JournalLoader({ isAdmin = false }) {
   return (
     <>
       <Journal />
-      <div style={{ position: "fixed", bottom: 16, right: 18, zIndex: 60, display: "flex", gap: 8 }}>
+      <div style={{ position: "fixed", bottom: 16, right: 18, zIndex: 20, display: "flex", gap: 8 }}>
         {isAdmin && (
           <Link
             href="/admin"

@@ -35,6 +35,8 @@ const IMPORT_FIELDS = [
   { key: "stopLoss", label: "Stop loss" },
   { key: "fees", label: "Poplatky" },
   { key: "pnl", label: "P&L (ručně)" },
+  { key: "mae", label: "MAE (max proti)" },
+  { key: "mfe", label: "MFE (max pro)" },
   { key: "playbook", label: "Playbook (název)" },
   { key: "tags", label: "Tagy (; nebo ,)" },
   { key: "notes", label: "Poznámky" },
@@ -49,6 +51,8 @@ const IMPORT_GUESS = {
   stopLoss: ["stop", "sl", "stop loss", "stoploss"],
   fees: ["fee", "fees", "commission", "poplatek", "poplatky"],
   pnl: ["pnl", "p&l", "p/l", "profit", "net", "realized", "výsledek", "zisk", "gain"],
+  mae: ["mae", "max adverse", "adverse excursion", "maxadverse", "drawdown"],
+  mfe: ["mfe", "max favorable", "favorable excursion", "maxfavorable", "runup", "run-up"],
   playbook: ["playbook", "strategy", "setup", "framework", "strategie"],
   tags: ["tag", "tags", "tagy", "labels"],
   notes: ["note", "notes", "comment", "poznámka", "poznámky", "description"],
@@ -169,20 +173,46 @@ const num = (v) => { const n = parseFloat(v); return isFinite(n) ? n : NaN; };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+/* ---------- instrumenty (tick size / tick value) ---------- */
+let INSTR = {}; // symbol(UPPER) -> { tickSize, tickValue, ... }
+function setInstruments(list) {
+  const m = {};
+  (list || []).forEach((i) => { if (i && i.symbol) m[String(i.symbol).toUpperCase()] = i; });
+  INSTR = m;
+}
+function instrFor(t) {
+  const s = (t.symbol || "").toString().trim().toUpperCase();
+  return s && INSTR[s] ? INSTR[s] : null;
+}
+
 function computePnl(t) {
-  const e = num(t.entryPrice), x = num(t.exitPrice), s = num(t.quantity);
-  if (isFinite(e) && isFinite(x) && isFinite(s)) {
-    const g = t.direction === "short" ? (e - x) * s : (x - e) * s;
-    return g - (num(t.fees) || 0);
+  const inst = instrFor(t);
+  const e = num(t.entryPrice), x = num(t.exitPrice), q = num(t.quantity);
+  const fees = isFinite(num(t.fees)) ? num(t.fees) : 0;
+  if (inst && isFinite(e) && isFinite(x) && isFinite(q) && inst.tickSize > 0) {
+    const move = t.direction === "short" ? (e - x) : (x - e);   // příznivý pohyb v ceně
+    const ticks = move / inst.tickSize;
+    return ticks * inst.tickValue * q - fees;                    // USD
+  }
+  if (isFinite(e) && isFinite(x) && isFinite(q)) {
+    const g = t.direction === "short" ? (e - x) * q : (x - e) * q;
+    return g - fees;
   }
   const m = num(t.pnl);
   return isFinite(m) ? m : 0;
 }
 function computeR(t) {
-  const e = num(t.entryPrice), st = num(t.stopLoss), s = num(t.quantity);
-  if (isFinite(e) && isFinite(st) && isFinite(s) && e !== st) {
-    const risk = Math.abs(e - st) * s;
-    if (risk > 0) return computePnl(t) / risk;
+  const inst = instrFor(t);
+  const e = num(t.entryPrice), st = num(t.stopLoss), q = num(t.quantity);
+  if (isFinite(e) && isFinite(st) && isFinite(q) && e !== st) {
+    if (inst && inst.tickSize > 0) {
+      const riskTicks = Math.abs(e - st) / inst.tickSize;
+      const riskUSD = riskTicks * inst.tickValue * q;
+      if (riskUSD > 0) return computePnl(t) / riskUSD;
+    } else {
+      const risk = Math.abs(e - st) * q;
+      if (risk > 0) return computePnl(t) / risk;
+    }
   }
   return null;
 }
@@ -377,6 +407,7 @@ export default function App() {
       if (!pg || !pg.rules || pg.rules.length === 0) { pg = { rules: seedRules(), log: (pg && pg.log) || {} }; store.set(P_KEY, JSON.stringify(pg)); }
       setProgress(pg);
       try { const dm = await store.get(D_KEY); if (dm === "$" || dm === "R") setDashMode(dm); } catch {}
+      try { const ir = await fetch("/api/instruments"); if (ir.ok) { const id = await ir.json(); setInstruments(id.instruments || []); } } catch {}
 
       // přenos dat ze starší verze (klíče journal:*), pokud tu ještě nic není
       if (tr.length === 0) {
@@ -491,6 +522,7 @@ export default function App() {
       t.direction = (dv.includes("short") || dv.includes("sell") || dv === "s") ? "short" : "long";
       t.entryPrice = parseNumStr(get("entryPrice")); t.exitPrice = parseNumStr(get("exitPrice")); t.quantity = parseNumStr(get("quantity"));
       t.stopLoss = parseNumStr(get("stopLoss")); t.fees = parseNumStr(get("fees")); t.pnl = parseNumStr(get("pnl"));
+      t.mae = parseNumStr(get("mae")); t.mfe = parseNumStr(get("mfe"));
       t.notes = String(get("notes") || "");
       const tagsRaw = String(get("tags") || ""); t.tags = tagsRaw ? tagsRaw.split(/[;,]/).map((s) => s.trim()).filter(Boolean) : [];
       const pb = String(get("playbook") || ""); if (pb) t.frameworkId = getFw(pb);
@@ -1936,7 +1968,7 @@ function Style() {
 .shot-del{position:absolute;top:3px;right:3px;background:rgba(10,12,20,.72);border:0;color:#fff;border-radius:6px;width:20px;height:20px;display:grid;place-items:center;cursor:pointer;}
 .shot-add{width:84px;height:64px;border:1.5px dashed var(--line);border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--muted);cursor:pointer;font-size:11px;}
 .shot-add:hover{border-color:var(--accent);color:var(--accent);}
-.lightbox{position:fixed;inset:0;background:rgba(8,10,18,.86);display:flex;align-items:center;justify-content:center;z-index:50;padding:32px;cursor:zoom-out;}
+.lightbox{position:fixed;inset:0;background:rgba(8,10,18,.86);display:flex;align-items:center;justify-content:center;z-index:1200;padding:32px;cursor:zoom-out;}
 .lightbox img{max-width:100%;max-height:100%;border-radius:10px;}
 .lb-x{position:absolute;top:20px;right:24px;background:rgba(255,255,255,.12);border:0;color:#fff;width:38px;height:38px;border-radius:10px;display:grid;place-items:center;cursor:pointer;}
 .lb-x:hover{background:rgba(255,255,255,.22);}
@@ -2296,7 +2328,7 @@ function Style() {
 .empty-card .btn{margin:0 auto;}
 
 /* sheet */
-.overlay{position:fixed;inset:0;background:rgba(20,24,40,.4);backdrop-filter:blur(2px);display:flex;justify-content:flex-end;z-index:30;}
+.overlay{position:fixed;inset:0;background:rgba(20,24,40,.4);backdrop-filter:blur(2px);display:flex;justify-content:flex-end;z-index:1000;}
 .sheet{width:min(540px,100%);height:100%;background:var(--bg);border-left:1px solid var(--line);display:flex;flex-direction:column;animation:sl .22s ease;}
 .sheet.narrow{width:min(440px,100%);}
 @keyframes sl{from{transform:translateX(28px);opacity:.5;}to{transform:none;opacity:1;}}

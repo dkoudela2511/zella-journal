@@ -3,12 +3,17 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 function num(v) { return parseFloat(v); }
-function computePnl(t) {
-  const e = num(t.entryPrice), x = num(t.exitPrice), s = num(t.quantity);
-  if (isFinite(e) && isFinite(x) && isFinite(s)) {
-    const g = t.direction === "short" ? (e - x) * s : (x - e) * s;
-    const f = num(t.fees);
-    return g - (isFinite(f) ? f : 0);
+function computePnl(t, instMap) {
+  const inst = instMap && instMap[String(t.symbol || "").trim().toUpperCase()];
+  const e = num(t.entryPrice), x = num(t.exitPrice), q = num(t.quantity);
+  const fees = isFinite(num(t.fees)) ? num(t.fees) : 0;
+  if (inst && isFinite(e) && isFinite(x) && isFinite(q) && inst.tickSize > 0) {
+    const move = t.direction === "short" ? (e - x) : (x - e);
+    return (move / inst.tickSize) * inst.tickValue * q - fees;
+  }
+  if (isFinite(e) && isFinite(x) && isFinite(q)) {
+    const g = t.direction === "short" ? (e - x) * q : (x - e) * q;
+    return g - fees;
   }
   const m = num(t.pnl);
   return isFinite(m) ? m : 0;
@@ -36,9 +41,15 @@ export default function MentorView({ userId }) {
     return m;
   }, [data]);
 
+  const instMap = useMemo(() => {
+    const m = {};
+    (data?.instruments || []).forEach((i) => { if (i && i.symbol) m[String(i.symbol).toUpperCase()] = i; });
+    return m;
+  }, [data]);
+
   const stats = useMemo(() => {
     const real = (data?.trades || []).filter((t) => !t.missed);
-    const pnls = real.map(computePnl);
+    const pnls = real.map((t) => computePnl(t, instMap));
     const net = pnls.reduce((a, b) => a + b, 0);
     const wins = pnls.filter((p) => p > 0);
     const losses = pnls.filter((p) => p < 0);
@@ -51,7 +62,7 @@ export default function MentorView({ userId }) {
       profitFactor: grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? Infinity : 0),
       avg: n ? net / n : 0,
     };
-  }, [data]);
+  }, [data, instMap]);
 
   const sorted = useMemo(
     () => [...(data?.trades || [])].sort((a, b) => new Date(b.date) - new Date(a.date)),
@@ -96,7 +107,7 @@ export default function MentorView({ userId }) {
             </thead>
             <tbody>
               {sorted.map((t) => {
-                const p = computePnl(t); const f = fwById[t.frameworkId];
+                const p = computePnl(t, instMap); const f = fwById[t.frameworkId];
                 return (
                   <tr key={t.id} className={t.missed ? "row-missed" : ""}>
                     <td>{dt(t.date)}</td>

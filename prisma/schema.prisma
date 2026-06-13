@@ -7,6 +7,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Globální knihovna instrumentů (trhů) – tick size a tick value.
+// Spravuje pouze admin; ostatní uživatelé čtou read-only.
+model Instrument {
+  symbol    String  @id
+  name      String?
+  tickSize  Float
+  tickValue Float
+  currency  String  @default("USD")
+  sortOrder Int     @default(0)
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique

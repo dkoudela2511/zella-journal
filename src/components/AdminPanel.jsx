@@ -27,6 +27,7 @@ export default function AdminPanel() {
       <div className="admin-top">
         <div className="admin-brand"><span className="auth-mark">Z</span><span>Mentor – přehled studentů</span></div>
         <div className="admin-actions">
+          <Link href="/admin/instruments" className="admin-link">Instrumenty</Link>
           <Link href="/app" className="admin-link">Můj deník</Link>
           <button className="admin-link" onClick={() => signOut({ callbackUrl: "/login" })}>Odhlásit</button>
         </div>

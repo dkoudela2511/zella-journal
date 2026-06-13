@@ -26,10 +26,13 @@ export async function GET(req) {
   const data = {};
   rows.forEach((r) => { try { data[r.key] = JSON.parse(r.value); } catch { data[r.key] = null; } });
 
+  const instruments = await prisma.instrument.findMany();
+
   return NextResponse.json({
     user,
     trades: data["tz:trades:v1"] || [],
     accounts: data["tz:accounts:v1"] || [],
     frameworks: data["tz:frameworks:v1"] || [],
+    instruments,
   });
 }

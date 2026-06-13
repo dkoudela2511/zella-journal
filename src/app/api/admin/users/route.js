@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { summarize } from "@/lib/stats";
+import { summarize, instrumentMap } from "@/lib/stats";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -15,7 +15,6 @@ export async function GET() {
     select: { id: true, email: true, name: true, role: true, createdAt: true },
   });
 
-  // Načti obchody všech uživatelů jedním dotazem
   const tradeRows = await prisma.store.findMany({
     where: { key: "tz:trades:v1" },
     select: { userId: true, value: true },
@@ -23,10 +22,13 @@ export async function GET() {
   const byUser = {};
   tradeRows.forEach((r) => { byUser[r.userId] = r.value; });
 
+  const instruments = await prisma.instrument.findMany();
+  const instMap = instrumentMap(instruments);
+
   const result = users.map((u) => {
     let trades = [];
     try { trades = JSON.parse(byUser[u.id] || "[]"); } catch {}
-    const s = summarize(trades);
+    const s = summarize(trades, instMap);
     return {
       id: u.id, email: u.email, name: u.name, role: u.role, createdAt: u.createdAt,
       tradeCount: s.tradeCount, netPnl: s.netPnl, winRate: s.winRate,
