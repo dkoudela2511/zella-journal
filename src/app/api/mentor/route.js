@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { summarize, instrumentMap } from "@/lib/stats";
 
+const SEEN_KEY = "tz:mentor:seen:v1";
+
 function genCode() {
   const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let s = "";
@@ -17,29 +19,30 @@ async function requireAdmin() {
   return session.user;
 }
 
+async function getSeenMap(mentorId) {
+  const row = await prisma.store.findUnique({ where: { userId_key: { userId: mentorId, key: SEEN_KEY } } });
+  if (!row) return {};
+  try { return JSON.parse(row.value) || {}; } catch { return {}; }
+}
+
 export async function GET() {
   const me = await requireAdmin();
   if (!me) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-  const codes = await prisma.inviteCode.findMany({
-    where: { mentorId: me.id },
-    orderBy: { createdAt: "desc" },
-  });
-  // doplníme jména studentů, kteří kód použili
-  const usedIds = codes.map((c) => c.usedById).filter(Boolean);
+  const codes = await prisma.inviteCode.findMany({ where: { mentorId: me.id }, orderBy: { createdAt: "desc" } });
   const students = await prisma.user.findMany({
     where: { mentorId: me.id },
     select: { id: true, email: true, name: true, createdAt: true },
     orderBy: { createdAt: "desc" },
   });
   const usersById = {};
-  [...students].forEach((u) => (usersById[u.id] = u));
+  students.forEach((u) => (usersById[u.id] = u));
+  const usedIds = codes.map((c) => c.usedById).filter(Boolean);
   if (usedIds.length) {
     const extra = await prisma.user.findMany({ where: { id: { in: usedIds } }, select: { id: true, name: true, email: true } });
-    extra.forEach((u) => (usersById[u.id] = usersById[u.id] || u));
+    extra.forEach((u) => { usersById[u.id] = usersById[u.id] || u; });
   }
 
-  // souhrn dozorovaných obchodů u každého studenta
   const sids = students.map((s) => s.id);
   const mtRows = sids.length
     ? await prisma.store.findMany({ where: { userId: { in: sids }, key: "tz:mentor:trades:v1" }, select: { userId: true, value: true } })
@@ -50,17 +53,22 @@ export async function GET() {
   const tradesByUser = {}; mtRows.forEach((r) => (tradesByUser[r.userId] = r.value));
   const plansByUser = {}; mpRows.forEach((r) => (plansByUser[r.userId] = r.value));
 
+  const seen = await getSeenMap(me.id);
   const instruments = await prisma.instrument.findMany();
   const instMap = instrumentMap(instruments);
 
+  let totalNew = 0;
   const studentList = students.map((u) => {
     let trades = []; try { trades = JSON.parse(tradesByUser[u.id] || "[]"); } catch {}
-    let plans = {}; try { plans = JSON.parse(plansByUser[u.id] || "{}"); } catch {}
+    let plans = []; try { const v = JSON.parse(plansByUser[u.id] || "[]"); plans = Array.isArray(v) ? v : []; } catch {}
+    const since = seen[u.id] || "";
+    const newPlans = plans.filter((p) => p && p.createdAt && p.createdAt > since).length;
+    totalNew += newPlans;
     const s = summarize(trades, instMap);
     return {
       id: u.id, email: u.email, name: u.name, createdAt: u.createdAt,
       tradeCount: s.tradeCount, netPnl: s.netPnl, winRate: s.winRate,
-      planCount: Object.keys(plans || {}).length,
+      planCount: plans.length, newPlans,
     };
   });
 
@@ -70,7 +78,7 @@ export async function GET() {
     usedByName: c.usedById ? (usersById[c.usedById]?.name || usersById[c.usedById]?.email || "—") : null,
   }));
 
-  return NextResponse.json({ codes: codeList, students: studentList });
+  return NextResponse.json({ codes: codeList, students: studentList, totalNew });
 }
 
 export async function POST(req) {
@@ -100,6 +108,18 @@ export async function POST(req) {
   if (action === "unenroll") {
     if (!body.userId) return NextResponse.json({ error: "missing userId" }, { status: 400 });
     await prisma.user.updateMany({ where: { id: body.userId, mentorId: me.id }, data: { mentorId: null } });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "seen") {
+    if (!body.userId) return NextResponse.json({ error: "missing userId" }, { status: 400 });
+    const seen = await getSeenMap(me.id);
+    seen[body.userId] = new Date().toISOString();
+    await prisma.store.upsert({
+      where: { userId_key: { userId: me.id, key: SEEN_KEY } },
+      update: { value: JSON.stringify(seen) },
+      create: { userId: me.id, key: SEEN_KEY, value: JSON.stringify(seen) },
+    });
     return NextResponse.json({ ok: true });
   }
 

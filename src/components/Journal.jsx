@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Plus, Pencil, Trash2, X, Search, TrendingUp, TrendingDown, LayoutDashboard,
-  BookOpen, CalendarDays, Layers, ChevronLeft, ChevronRight, Wallet, Target,
+  BookOpen, CalendarDays, Layers, ChevronLeft, ChevronRight, ChevronDown, Wallet, Target,
   ClipboardList, FileText, NotebookText, BarChart3, Check, ListChecks, Settings, Image as ImageIcon,
   GraduationCap, Lock,
 } from "lucide-react";
@@ -449,10 +449,11 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
   // mentoring
   const [enrolled, setEnrolled] = useState(enrolledProp);
   const [mentorName, setMentorName] = useState(mentorNameProp);
-  const [mentorPlans, setMentorPlans] = useState({});
+  const [mentorPlans, setMentorPlans] = useState([]);
   const [mentorTrades, setMentorTrades] = useState([]);
   const [mentorTab, setMentorTab] = useState("plans");
   const [editingMTrade, setEditingMTrade] = useState(null);
+  const [instrumentsList, setInstrumentsList] = useState([]);
 
   /* načtení + migrace setup -> framework + účty */
   useEffect(() => {
@@ -469,7 +470,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       if (!pg || !pg.rules || pg.rules.length === 0) { pg = { rules: seedRules(), log: (pg && pg.log) || {} }; store.set(P_KEY, JSON.stringify(pg)); }
       setProgress(pg);
       try { const dm = await store.get(D_KEY); if (dm === "$" || dm === "R") setDashMode(dm); } catch {}
-      try { const ir = await fetch("/api/instruments"); if (ir.ok) { const id = await ir.json(); setInstruments(id.instruments || []); } } catch {}
+      try { const ir = await fetch("/api/instruments"); if (ir.ok) { const id = await ir.json(); setInstruments(id.instruments || []); setInstrumentsList(id.instruments || []); } } catch {}
 
       // přenos dat ze starší verze (klíče journal:*), pokud tu ještě nic není
       if (tr.length === 0) {
@@ -514,7 +515,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
   useEffect(() => {
     if (!enrolled) return;
     (async () => {
-      try { setMentorPlans(JSON.parse((await store.get(MP_KEY)) || "{}") || {}); } catch {}
+      try { const v = JSON.parse((await store.get(MP_KEY)) || "[]"); setMentorPlans(Array.isArray(v) ? v : []); } catch {}
       try { setMentorTrades(JSON.parse((await store.get(MT_KEY)) || "[]") || []); } catch {}
     })();
   }, [enrolled]);
@@ -522,14 +523,18 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
   const persistMentorPlans = useCallback((next) => { setMentorPlans(next); store.set(MP_KEY, JSON.stringify(next)); }, []);
   const persistMentorTrades = useCallback((next) => { setMentorTrades(next); store.set(MT_KEY, JSON.stringify(next)); }, []);
 
-  const saveMentorPlan = (dayKey, patch) => {
-    const next = { ...mentorPlans, [dayKey]: { ...(mentorPlans[dayKey] || {}), ...patch } };
-    persistMentorPlans(next);
+  const blankPlan = () => ({
+    id: uid(), date: new Date().toISOString().slice(0, 10), symbol: "", frameworkId: "",
+    weekly: { note: "", shots: [] }, daily: { note: "", shots: [] }, auction: { note: "", shots: [] },
+    description: "", outcome: "", adherence: "", lessons: "", debriefShots: [], createdAt: null,
+  });
+  const newMentorPlan = () => { persistMentorPlans([blankPlan(), ...mentorPlans]); };
+  const saveMentorPlan = (id, patch) => {
+    persistMentorPlans(mentorPlans.map((p) => (p.id === id
+      ? { ...p, ...patch, createdAt: p.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() }
+      : p)));
   };
-  const newMentorPlanDay = () => {
-    const k = new Date().toISOString().slice(0, 10);
-    if (!mentorPlans[k]) persistMentorPlans({ ...mentorPlans, [k]: { adherence: "" } });
-  };
+  const deleteMentorPlan = (id) => { if (window.confirm("Smazat tento obchodní plán?")) persistMentorPlans(mentorPlans.filter((p) => p.id !== id)); };
   const saveMentorTrade = (t) => {
     const exists = mentorTrades.some((x) => x.id === t.id);
     persistMentorTrades(exists ? mentorTrades.map((x) => (x.id === t.id ? t : x)) : [t, ...mentorTrades]);
@@ -760,9 +765,9 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
           : view === "mentoring" ? (
             !enrolled ? <RedeemScreen onRedeem={redeemCode} />
             : <MentoringView
-                plans={mentorPlans} mtrades={mentorTrades} fwById={fwById} cur={cur} mentorName={mentorName}
+                plans={mentorPlans} mtrades={mentorTrades} fwById={fwById} frameworks={frameworks} instruments={instrumentsList} cur={cur} mentorName={mentorName}
                 tab={mentorTab} setTab={setMentorTab}
-                onSavePlan={saveMentorPlan} onNewPlanDay={newMentorPlanDay}
+                onSavePlan={saveMentorPlan} onNewPlan={newMentorPlan} onDeletePlan={deleteMentorPlan}
                 onAddTrade={() => setEditingMTrade({ ...blankTrade(), accountId: activeAcc })}
                 onEditTrade={(t) => setEditingMTrade({ ...t })} onDeleteTrade={deleteMentorTrade} />
           )
@@ -1753,7 +1758,7 @@ function ChipInput({ values, onChange, placeholder, tone }) {
   );
 }
 
-function ShotInput({ shots, onChange }) {
+function ShotInput({ shots, onChange, large = false }) {
   const [view, setView] = useState(null);
   const [busy, setBusy] = useState(false);
   const onPick = async (e) => {
@@ -1765,7 +1770,7 @@ function ShotInput({ shots, onChange }) {
   };
   return (
     <>
-      <div className="shots">
+      <div className={`shots ${large ? "large" : ""}`}>
         {shots.map((s, i) => (
           <div className="shot" key={i}>
             <img src={s} alt="" onClick={() => setView(s)} />
@@ -1773,7 +1778,7 @@ function ShotInput({ shots, onChange }) {
           </div>
         ))}
         <label className="shot-add">
-          <ImageIcon size={18} /><span>{busy ? "Zpracovávám…" : "Přidat"}</span>
+          <ImageIcon size={18} /><span>{busy ? "Zpracovávám…" : "Přidat screen"}</span>
           <input type="file" accept="image/*" multiple onChange={onPick} hidden />
         </label>
       </div>
@@ -2130,25 +2135,22 @@ function RedeemScreen({ onRedeem }) {
 
 const ADH_OPTS = [{ v: "yes", l: "Držel jsem plán" }, { v: "partial", l: "Částečně" }, { v: "no", l: "Nedržel" }];
 function adhLabel(v) { return v === "yes" ? "Držel plán" : v === "partial" ? "Částečně" : v === "no" ? "Nedržel" : ""; }
+const PLAN_SECTIONS = [
+  { key: "weekly", letter: "a", label: "Situace — weekly profil", ph: "Týdenní profil, akceptace, kam to vidím…" },
+  { key: "daily", letter: "b", label: "Situace — daily profil", ph: "Denní profil, otevření vůči včerejšku…" },
+  { key: "auction", letter: "c", label: "Stav aukce", ph: "Kdo má kontrolu, kam se aukce rozšiřuje…" },
+];
 
-function MentoringView({ plans, mtrades, fwById, cur, mentorName, tab, setTab, onSavePlan, onNewPlanDay, onAddTrade, onEditTrade, onDeleteTrade }) {
-  const planDays = useMemo(() => {
-    const keys = new Set(Object.keys(plans || {}));
-    mtrades.forEach((t) => { const k = dayKey(t.date); if (k) keys.add(k); });
-    keys.add(new Date().toISOString().slice(0, 10));
-    return [...keys].sort((a, b) => (a < b ? 1 : -1));
-  }, [plans, mtrades]);
-
+function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, mentorName, tab, setTab, onSavePlan, onNewPlan, onDeletePlan, onAddTrade, onEditTrade, onDeleteTrade }) {
+  const sortedPlans = useMemo(
+    () => [...plans].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""))),
+    [plans]
+  );
   const adh = useMemo(() => {
     const c = { yes: 0, partial: 0, no: 0 };
-    Object.values(plans || {}).forEach((p) => { if (p && c[p.adherence] != null) c[p.adherence]++; });
+    plans.forEach((p) => { if (p && c[p.adherence] != null) c[p.adherence]++; });
     return c;
   }, [plans]);
-
-  const tradesByDay = useMemo(() => {
-    const m = {}; mtrades.forEach((t) => { const k = dayKey(t.date); (m[k] = m[k] || []).push(t); }); return m;
-  }, [mtrades]);
-
   const s = computeStats(mtrades.filter((t) => !t.missed));
 
   return (
@@ -2163,15 +2165,18 @@ function MentoringView({ plans, mtrades, fwById, cur, mentorName, tab, setTab, o
       </div>
 
       <div className="mtr-tabs">
-        <button className={tab === "plans" ? "on" : ""} onClick={() => setTab("plans")}>Denní plány</button>
+        <button className={tab === "plans" ? "on" : ""} onClick={() => setTab("plans")}>Obchodní plány</button>
         <button className={tab === "trades" ? "on" : ""} onClick={() => setTab("trades")}>Dozorované obchody</button>
       </div>
 
       {tab === "plans" ? (
         <>
-          <div className="mtr-bar"><button className="btn primary sm" onClick={onNewPlanDay}><Plus size={14} /> Nový denní plán (dnes)</button></div>
-          {planDays.map((dk) => (
-            <PlanCard key={dk} dk={dk} plan={plans[dk] || {}} dayTrades={tradesByDay[dk] || []} cur={cur} onSave={(patch) => onSavePlan(dk, patch)} />
+          <div className="mtr-bar"><button className="btn primary sm" onClick={onNewPlan}><Plus size={14} /> Přidat obchodní plán</button></div>
+          {sortedPlans.length === 0 ? (
+            <div className="card empty-card center"><p>Zatím žádný obchodní plán. Ráno před trhem si rozepiš weekly, daily a stav aukce — jakmile plán uložíš, mentor uvidí, že máš nový.</p></div>
+          ) : sortedPlans.map((p) => (
+            <PlanCard key={p.id} plan={p} frameworks={frameworks} fwById={fwById} instruments={instruments} cur={cur}
+              onSave={(patch) => onSavePlan(p.id, patch)} onDelete={() => onDeletePlan(p.id)} />
           ))}
         </>
       ) : (
@@ -2218,53 +2223,80 @@ function MentoringView({ plans, mtrades, fwById, cur, mentorName, tab, setTab, o
   );
 }
 
-function PlanCard({ dk, plan, dayTrades, cur, onSave }) {
+function PlanCard({ plan, frameworks, fwById, instruments, cur, onSave, onDelete }) {
   const [d, setD] = useState(plan);
+  const [showDebrief, setShowDebrief] = useState(!!(plan.outcome || plan.adherence || plan.lessons || (plan.debriefShots || []).length));
   useEffect(() => { setD(plan); }, [plan]);
-  const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
   const dirty = JSON.stringify(d) !== JSON.stringify(plan);
-  const dt = new Date(dk + "T00:00:00");
-  const weekday = dt.toLocaleDateString("cs-CZ", { weekday: "long" });
-  const dateStr = dt.toLocaleDateString("cs-CZ", { day: "numeric", month: "long", year: "numeric" });
-  const dayPnl = dayTrades.filter((t) => !t.missed).reduce((a, t) => a + computePnl(t), 0);
+  const setF = (k, v) => setD({ ...d, [k]: v });
+  const setSec = (sec, patch) => setD({ ...d, [sec]: { ...(d[sec] || { note: "", shots: [] }), ...patch } });
 
   return (
     <div className="card plan-card">
       <div className="plan-head">
-        <div className="plan-when"><span className="plan-wd">{weekday}</span><span className="plan-date">{dateStr}</span></div>
+        <div className="plan-when">
+          <span className="plan-wd">Obchodní plán</span>
+          <input type="date" className="plan-date-in" value={d.date || ""} onChange={(e) => setF("date", e.target.value)} />
+        </div>
         <div className="plan-head-r">
-          {dayTrades.length > 0 && <span className={`plan-pnl ${dayPnl >= 0 ? "pos" : "neg"}`}>{fmtMoney(dayPnl, cur)} · {dayTrades.length} obch.</span>}
           {d.adherence && <span className={`adh-chip ${d.adherence}`}>{adhLabel(d.adherence)}</span>}
+          <button className="ic-btn" onClick={onDelete} title="Smazat plán"><Trash2 size={14} /></button>
         </div>
       </div>
 
-      <div className="plan-grid">
-        <div className="plan-col">
-          <h4>📋 Plán (před trhem)</h4>
-          <label>Výhled / bias</label>
-          <textarea rows={2} value={d.bias || ""} onChange={set("bias")} placeholder="Kam to vidím, jaký mám bias…" />
-          <label>Klíčové úrovně / watchlist</label>
-          <textarea rows={2} value={d.levels || ""} onChange={set("levels")} placeholder="Supporty, resistance, co sleduju…" />
-          <label>Scénáře — co chci dělat a proč</label>
-          <textarea rows={3} value={d.scenarios || ""} onChange={set("scenarios")} placeholder="Když cena udělá X, udělám Y, protože…" />
-          <label>Screeny analýzy</label>
-          <ShotInput shots={d.planShots || []} onChange={(v) => setD({ ...d, planShots: v })} />
+      <div className="plan-basics">
+        <div>
+          <label>Trh</label>
+          <select value={d.symbol || ""} onChange={(e) => setF("symbol", e.target.value)}>
+            <option value="">— vyber trh —</option>
+            {instruments.map((i) => <option key={i.symbol} value={i.symbol}>{i.symbol}{i.name ? ` — ${i.name}` : ""}</option>)}
+          </select>
         </div>
-        <div className="plan-col">
-          <h4>✅ Debrief (po trhu)</h4>
-          <label>Jak to dopadlo</label>
-          <textarea rows={2} value={d.outcome || ""} onChange={set("outcome")} placeholder="Co se dělo, jak jsem reagoval…" />
-          <label>Držel jsem se plánu?</label>
-          <div className="adh-pick">
-            {ADH_OPTS.map((o) => (
-              <button key={o.v} type="button" className={`adh-opt ${o.v} ${d.adherence === o.v ? "on" : ""}`} onClick={() => setD({ ...d, adherence: o.v })}>{o.l}</button>
-            ))}
+        <div>
+          <label>Framework</label>
+          <select value={d.frameworkId || ""} onChange={(e) => setF("frameworkId", e.target.value)}>
+            <option value="">— vyber playbook —</option>
+            {frameworks.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {PLAN_SECTIONS.map((sec) => {
+        const v = d[sec.key] || { note: "", shots: [] };
+        return (
+          <div className="plan-sec" key={sec.key}>
+            <div className="plan-sec-h"><span className="plan-sec-n">{sec.letter}</span>{sec.label}</div>
+            <textarea rows={2} value={v.note || ""} onChange={(e) => setSec(sec.key, { note: e.target.value })} placeholder={sec.ph} />
+            <ShotInput large shots={v.shots || []} onChange={(shots) => setSec(sec.key, { shots })} />
           </div>
-          <label>Co se povedlo / co příště jinak</label>
-          <textarea rows={3} value={d.lessons || ""} onChange={set("lessons")} placeholder="Plusy a poučení do příště…" />
-          <label>Screeny (po trhu)</label>
-          <ShotInput shots={d.debriefShots || []} onChange={(v) => setD({ ...d, debriefShots: v })} />
-        </div>
+        );
+      })}
+
+      <div className="plan-sec">
+        <div className="plan-sec-h"><span className="plan-sec-n">+</span>Popis plánu</div>
+        <textarea rows={3} value={d.description || ""} onChange={(e) => setF("description", e.target.value)} placeholder="Celkový záměr: co a proč chci dělat, vstup, stop, cíl…" />
+      </div>
+
+      <div className="plan-debrief">
+        <button className="debrief-toggle" onClick={() => setShowDebrief((x) => !x)}>
+          {showDebrief ? <ChevronDown size={15} /> : <ChevronRight size={15} />} Po trhu (debrief &amp; disciplína)
+        </button>
+        {showDebrief && (
+          <div className="debrief-body">
+            <label>Jak to dopadlo</label>
+            <textarea rows={2} value={d.outcome || ""} onChange={(e) => setF("outcome", e.target.value)} placeholder="Co se dělo, jak jsem reagoval…" />
+            <label>Držel jsem se plánu?</label>
+            <div className="adh-pick">
+              {ADH_OPTS.map((o) => (
+                <button key={o.v} type="button" className={`adh-opt ${o.v} ${d.adherence === o.v ? "on" : ""}`} onClick={() => setF("adherence", o.v)}>{o.l}</button>
+              ))}
+            </div>
+            <label>Co se povedlo / co příště jinak</label>
+            <textarea rows={2} value={d.lessons || ""} onChange={(e) => setF("lessons", e.target.value)} placeholder="Plusy a poučení do příště…" />
+            <label>Screeny (po trhu)</label>
+            <ShotInput large shots={d.debriefShots || []} onChange={(shots) => setF("debriefShots", shots)} />
+          </div>
+        )}
       </div>
 
       {plan.mentorComment && (
@@ -2275,7 +2307,7 @@ function PlanCard({ dk, plan, dayTrades, cur, onSave }) {
       )}
 
       <div className="plan-foot">
-        {dirty ? <button className="btn primary sm" onClick={() => onSave(d)}>Uložit den</button> : <span className="plan-saved">Uloženo ✓</span>}
+        {dirty ? <button className="btn primary sm" onClick={() => onSave(d)}>Uložit plán</button> : <span className="plan-saved">Uloženo ✓</span>}
       </div>
     </div>
   );
@@ -2622,6 +2654,24 @@ function Style() {
 .mentor-note-b{font-size:13.5px;color:var(--text);line-height:1.55;white-space:pre-wrap;}
 .plan-foot{padding:0 16px 14px;display:flex;justify-content:flex-end;}
 .plan-saved{font-size:12.5px;color:#0F9D58;font-weight:600;}
+.plan-date-in{border:1px solid var(--line);border-radius:7px;padding:3px 8px;font-family:inherit;font-size:12px;color:var(--soft);}
+.plan-basics{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 16px;border-bottom:1px solid var(--line2);}
+.plan-basics label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
+.plan-basics select{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-family:inherit;font-size:13.5px;background:#fff;color:var(--text);}
+.plan-sec{padding:14px 16px;border-bottom:1px solid var(--line2);}
+.plan-sec-h{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;margin-bottom:9px;}
+.plan-sec-n{width:18px;height:18px;border-radius:50%;background:#EEEDFE;color:#3C3489;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;}
+.plan-sec textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-family:inherit;font-size:13.5px;resize:vertical;line-height:1.5;}
+.shots.large{flex-direction:column;align-items:stretch;gap:10px;margin-top:10px;}
+.shots.large .shot{width:100%;}
+.shots.large .shot img{width:100%;max-height:300px;object-fit:contain;background:#0E1320;border:1px solid var(--line);border-radius:9px;cursor:zoom-in;display:block;}
+.shots.large .shot-del{top:8px;right:8px;}
+.shots.large .shot-add{align-self:flex-start;}
+.plan-debrief{padding:6px 16px 4px;}
+.debrief-toggle{display:flex;align-items:center;gap:6px;background:none;border:none;font-family:inherit;font-size:13px;font-weight:600;color:var(--soft);cursor:pointer;padding:8px 0;}
+.debrief-body{padding-bottom:8px;}
+.debrief-body label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px;}
+.debrief-body textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-family:inherit;font-size:13.5px;resize:vertical;line-height:1.5;}
 .mtr-tbl{width:100%;border-collapse:collapse;font-size:13.5px;}
 .mtr-tbl th{text-align:left;padding:10px 12px;color:var(--muted);font-weight:600;font-size:12px;border-bottom:1px solid var(--line);}
 .mtr-tbl td{padding:10px 12px;border-bottom:1px solid var(--line2);}

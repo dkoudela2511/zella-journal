@@ -142,3 +142,18 @@ body {
 .mv-light { position: fixed; inset: 0; background: rgba(10,12,24,.8); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 30px; cursor: zoom-out; }
 .mv-light img { max-width: 92vw; max-height: 92vh; border-radius: 10px; }
 @media (max-width: 720px) { .pr-grid { grid-template-columns: 1fr; } }
+
+/* ---- mentoring v2 (admin) ---- */
+.new-badge { background: #FCEBEB; color: #A32D2D; font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 20px; margin-left: 8px; }
+.dot-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; background: #E0414A; color: #fff; font-size: 11px; font-weight: 700; border-radius: 20px; margin-left: 7px; vertical-align: middle; }
+.pr-basics { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 0.5px solid #F2F3F7; }
+.pr-tag { font-size: 13px; color: #8A90A2; }
+.pr-tag b { color: #1B1F2A; display: inline-flex; align-items: center; gap: 5px; }
+.pr-tag .fdot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.pr-sec { margin-bottom: 14px; }
+.pr-sec h4 { margin: 0 0 6px; font-size: 12px; color: #6B7280; }
+.pr-sec p { margin: 0 0 7px; font-size: 13.5px; line-height: 1.5; color: #2A2F3C; }
+.pr-sec p b { color: #1B1F2A; }
+.pr-debrief { border-top: 0.5px solid #F2F3F7; padding-top: 12px; }
+.pr-shots.big { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.pr-shots.big img { width: 100%; max-width: 560px; max-height: 320px; object-fit: contain; background: #0E1320; border: 0.5px solid #E8EAF1; border-radius: 9px; cursor: zoom-in; }

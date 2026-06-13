@@ -104,7 +104,7 @@ export default function AdminPanel() {
 
       {/* Moji studenti */}
       <div className="admin-card pad">
-        <h3 className="sec-h">Moji studenti <span className="count">{students.length}</span></h3>
+        <h3 className="sec-h">Moji studenti <span className="count">{students.length}</span>{mentor?.totalNew > 0 && <span className="new-badge">{mentor.totalNew} {mentor.totalNew === 1 ? "nový plán" : mentor.totalNew <= 4 ? "nové plány" : "nových plánů"}</span>}</h3>
         {students.length === 0 ? (
           <div className="sec-empty">Zatím nikdo. Jakmile někdo použije tvůj kód, objeví se tady.</div>
         ) : (
@@ -115,7 +115,7 @@ export default function AdminPanel() {
             <tbody>
               {students.map((u) => (
                 <tr key={u.id}>
-                  <td><div className="u-name">{u.name || "—"}</div><div className="u-mail">{u.email}</div></td>
+                  <td><div className="u-name">{u.name || "—"}{u.newPlans > 0 && <span className="dot-badge" title={`${u.newPlans} nových plánů`}>{u.newPlans}</span>}</div><div className="u-mail">{u.email}</div></td>
                   <td className="r">{u.planCount}</td>
                   <td className="r">{u.tradeCount}</td>
                   <td className={`r ${u.netPnl >= 0 ? "pos" : "neg"}`}>{u.tradeCount ? money(u.netPnl) : "—"}</td>

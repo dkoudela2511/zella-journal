@@ -34,20 +34,20 @@ export async function GET(req) {
     accounts: data["tz:accounts:v1"] || [],
     frameworks: data["tz:frameworks:v1"] || [],
     mentorTrades: data["tz:mentor:trades:v1"] || [],
-    mentorPlans: data["tz:mentor:plans:v1"] || {},
+    mentorPlans: Array.isArray(data["tz:mentor:plans:v1"]) ? data["tz:mentor:plans:v1"] : [],
     instruments,
   });
 }
 
-// POST: mentor zapíše komentář k dennímu plánu studenta
+// POST: mentor zapíše komentář k obchodnímu plánu studenta (podle planId)
 export async function POST(req) {
   const session = await getServerSession(authOptions);
   if (!session || session.user?.role !== "admin") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   const body = await req.json().catch(() => ({}));
-  const { userId, dayKey, comment } = body;
-  if (!userId || !dayKey) return NextResponse.json({ error: "missing fields" }, { status: 400 });
+  const { userId, planId, comment } = body;
+  if (!userId || !planId) return NextResponse.json({ error: "missing fields" }, { status: 400 });
 
   const student = await prisma.user.findUnique({ where: { id: userId }, select: { mentorId: true } });
   if (!student || student.mentorId !== session.user.id) {
@@ -56,12 +56,15 @@ export async function POST(req) {
 
   const key = "tz:mentor:plans:v1";
   const row = await prisma.store.findUnique({ where: { userId_key: { userId, key } } });
-  let plans = {};
-  if (row) { try { plans = JSON.parse(row.value) || {}; } catch {} }
-  const day = plans[dayKey] || {};
-  day.mentorComment = String(comment || "").slice(0, 2000);
-  day.mentorAt = new Date().toISOString();
-  plans[dayKey] = day;
+  let plans = [];
+  if (row) { try { const v = JSON.parse(row.value); plans = Array.isArray(v) ? v : []; } catch {} }
+  const at = new Date().toISOString();
+  let found = false;
+  plans = plans.map((p) => {
+    if (p && p.id === planId) { found = true; return { ...p, mentorComment: String(comment || "").slice(0, 2000), mentorAt: at }; }
+    return p;
+  });
+  if (!found) return NextResponse.json({ error: "plan not found" }, { status: 404 });
 
   await prisma.store.upsert({
     where: { userId_key: { userId, key } },
@@ -69,5 +72,5 @@ export async function POST(req) {
     create: { userId, key, value: JSON.stringify(plans) },
   });
 
-  return NextResponse.json({ ok: true, mentorAt: day.mentorAt });
+  return NextResponse.json({ ok: true, mentorAt: at });
 }
