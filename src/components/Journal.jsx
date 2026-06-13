@@ -77,6 +77,58 @@ function guessMapping(cols) {
   return m;
 }
 
+/* ---------- NinjaTrader (Trades export) ---------- */
+const NT_FEE_COLS = ["Commission", "Clearing Fee", "Exchange Fee", "IP Fee", "NFA Fee"];
+function ntRoot(instr) { return String(instr || "").trim().split(/\s+/)[0].toUpperCase(); } // "6E JUN26" -> "6E"
+function ntNum(v) { const n = parseFloat(parseNumStr(v)); return isFinite(n) ? n : 0; }
+function parseNinjaDate(s) {
+  const m = String(s || "").trim().match(/(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return null;
+  return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
+}
+const round = (n, d) => { const f = Math.pow(10, d); return Math.round(n * f) / f; };
+
+// Seskupí řádky se stejným vstupem do jednoho obchodu (volba B)
+function groupNinjaTrades(rows) {
+  const groups = {};
+  (rows || []).forEach((r) => {
+    const instr = r["Instrument"]; if (!instr) return;
+    const root = ntRoot(instr);
+    const dir = /short/i.test(r["Market pos."] || "") ? "short" : "long";
+    const entry = ntNum(r["Entry price"]);
+    const entryTime = String(r["Entry time"] || "");
+    const key = [root, dir, entryTime, entry].join("|");
+    if (!groups[key]) groups[key] = { root, dir, entry, entryTime, exitTime: String(r["Exit time"] || ""), qty: 0, exitSum: 0, profit: 0, fees: 0, mae: 0, mfe: 0, strategy: String(r["Strategy"] || "").trim() };
+    const g = groups[key];
+    const qty = ntNum(r["Qty"]);
+    g.qty += qty;
+    g.exitSum += ntNum(r["Exit price"]) * qty;
+    g.profit += ntNum(r["Profit"]);
+    NT_FEE_COLS.forEach((c) => { if (r[c] != null) g.fees += ntNum(r[c]); });
+    g.mae += ntNum(r["MAE"]);
+    g.mfe += ntNum(r["MFE"]);
+    const et = parseNinjaDate(r["Exit time"]); const ge = parseNinjaDate(g.exitTime);
+    if (et && ge && et > ge) g.exitTime = String(r["Exit time"]);
+  });
+  return Object.values(groups).map((g) => ({
+    symbol: g.root,
+    direction: g.dir,
+    quantity: g.qty ? String(g.qty) : "",
+    entryPrice: g.entry ? String(g.entry) : "",
+    exitPrice: g.qty ? String(round(g.exitSum / g.qty, 8)) : "",
+    date: parseNinjaDate(g.entryTime),
+    fees: String(round(g.fees, 2)),
+    mae: String(round(g.mae, 2)),
+    mfe: String(round(g.mfe, 2)),
+    pnl: String(round(g.profit, 2)),
+    strategy: g.strategy,
+  }));
+}
+function isNinjaTrades(cols) {
+  const set = new Set((cols || []).map((c) => String(c).trim()));
+  return set.has("Instrument") && set.has("Market pos.") && set.has("Entry price") && set.has("Exit price");
+}
+
 const FW_COLORS = ["#7C5CFC", "#16C784", "#F59E0B", "#EC4899", "#06B6D4", "#F0454E", "#8B5CF6", "#84CC16"];
 
 /* ---------- TradingView symbol mapping ---------- */
@@ -140,7 +192,7 @@ function ChartModal({ symbol, date, onClose }) {
         <div className="chart-body">
           <div className="tradingview-widget-container" ref={ref} style={{ height: "100%", width: "100%" }} />
         </div>
-        <div className="chart-note">Tip: vlevo nahoře v grafu lze změnit symbol nebo timeframe. Přes posun/„date range" se dostaneš na datum svého obchodu. Data dodává TradingView (zdarma).</div>
+        <div className="chart-note">Tip: vlevo nahoře v grafu lze změnit symbol i timeframe a posunem se dostaneš na datum svého obchodu. Data dodává TradingView (zdarma).</div>
       </div>
     </div>
   );
@@ -534,6 +586,32 @@ export default function App() {
     return made.length;
   };
 
+  const importNinjaTrades = (rawRows) => {
+    let fws = [...frameworks];
+    const fwByName = {}; fws.forEach((f) => (fwByName[f.name.toLowerCase()] = f));
+    const getFw = (name) => {
+      const k = (name || "").trim().toLowerCase(); if (!k) return "";
+      let f = fwByName[k];
+      if (!f) { f = { id: uid(), name: name.trim(), description: "", color: FW_COLORS[fws.length % FW_COLORS.length], rules: [] }; fws.push(f); fwByName[k] = f; }
+      return f.id;
+    };
+    const grouped = groupNinjaTrades(rawRows);
+    const made = grouped.map((g) => {
+      const t = blankTrade(); t.accountId = activeAcc;
+      t.symbol = g.symbol; t.direction = g.direction; t.quantity = g.quantity;
+      t.entryPrice = g.entryPrice; t.exitPrice = g.exitPrice;
+      t.date = g.date ? toLocalInput(g.date) : toLocalInput(new Date());
+      t.fees = g.fees; t.mae = g.mae; t.mfe = g.mfe; t.pnl = g.pnl;
+      t.reviewed = false;
+      if (g.strategy) t.frameworkId = getFw(g.strategy);
+      return t;
+    });
+    if (fws.length !== frameworks.length) persistF(fws);
+    persistT([...trades, ...made]);
+    setEditingImport(false);
+    return made.length;
+  };
+
   const createFramework = (name) => {
     const f = { id: uid(), name, description: "", color: FW_COLORS[frameworks.length % FW_COLORS.length], rules: [] };
     persistF([...frameworks, f]); return f.id;
@@ -606,7 +684,7 @@ export default function App() {
         </header>
 
         {!loaded ? <div className="empty">Načítám…</div>
-          : trades.length === 0 && view !== "frameworks" && view !== "dailyjournal" && view !== "notebook" && view !== "progress" ? <EmptyState onAdd={() => setEditing(newTrade())} />
+          : trades.length === 0 && view !== "frameworks" && view !== "dailyjournal" && view !== "notebook" && view !== "progress" ? <EmptyState onAdd={() => setEditing(newTrade())} onImport={() => setEditingImport(true)} />
           : view === "dashboard" ? <Dashboard stats={stats} trades={realTrades} cur={cur} fwById={fwById} onAdd={() => setEditing(newTrade())} mode={dashMode} onMode={changeDashMode} />
           : view === "dailyjournal" ? (
             <DailyJournalView trades={realTrades} fwById={fwById} cur={cur} notes={dailyNotes} onSaveNote={saveNote} onEditTrade={(t) => setEditing({ ...t })} onAdd={() => setEditing(newTrade())} />
@@ -655,7 +733,7 @@ export default function App() {
         <AccountsForm initial={accounts} hasTradesFor={(id) => trades.some((t) => t.accountId === id)} onSave={saveAccounts} onCancel={() => setEditingAccounts(false)} />
       )}
       {editingImport && (
-        <ImportForm onImport={importTrades} onCancel={() => setEditingImport(false)} />
+        <ImportForm onImport={importTrades} onImportNinja={importNinjaTrades} onCancel={() => setEditingImport(false)} />
       )}
       {chartFor && (
         <ChartModal symbol={chartFor.symbol} date={chartFor.date} onClose={() => setChartFor(null)} />
@@ -1049,7 +1127,7 @@ function NoteForm({ initial, folders, onSave, onCancel }) {
   const removeTag = (t) => setN({ ...n, tags: (n.tags || []).filter((x) => x !== t) });
 
   return (
-    <div className="overlay" onClick={onCancel}>
+    <div className="overlay">
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-h"><h3>{isEdit ? "Upravit poznámku" : "Nová poznámka"}</h3><button className="x" onClick={onCancel}><X size={18} /></button></div>
         <div className="sheet-b">
@@ -1082,7 +1160,7 @@ function FolderForm({ initial, onSave, onCancel, onDelete }) {
   const [f, setF] = useState(initial);
   const valid = f.name.trim().length > 0;
   return (
-    <div className="overlay" onClick={onCancel}>
+    <div className="overlay">
       <div className="sheet narrow" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-h"><h3>{initial.name ? "Upravit složku" : "Nová složka"}</h3><button className="x" onClick={onCancel}><X size={18} /></button></div>
         <div className="sheet-b">
@@ -1430,7 +1508,7 @@ function RulesForm({ initial, onSave, onCancel }) {
   const del = (i) => setRules((rs) => rs.filter((_, j) => j !== i));
   const save = () => onSave(rules.filter((r) => r.name.trim()).map((r) => ({ ...r, name: r.name.trim() })));
   return (
-    <div className="overlay" onClick={onCancel}>
+    <div className="overlay">
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-h"><h3>Pravidla disciplíny</h3><button className="x" onClick={onCancel}><X size={18} /></button></div>
         <div className="sheet-b">
@@ -1655,7 +1733,7 @@ function AccountsForm({ initial, hasTradesFor, onSave, onCancel }) {
   const valid = accounts.length > 0 && accounts.every((a) => a.name.trim());
   const save = () => onSave(accounts.map((a) => ({ ...a, name: a.name.trim(), currency: (a.currency || "$").slice(0, 3) })));
   return (
-    <div className="overlay" onClick={onCancel}>
+    <div className="overlay">
       <div className="sheet narrow" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-h"><h3>Účty</h3><button className="x" onClick={onCancel}><X size={18} /></button></div>
         <div className="sheet-b">
@@ -1675,12 +1753,13 @@ function AccountsForm({ initial, hasTradesFor, onSave, onCancel }) {
   );
 }
 
-function ImportForm({ onImport, onCancel }) {
+function ImportForm({ onImport, onImportNinja, onCancel }) {
   const [cols, setCols] = useState(null);
   const [rows, setRows] = useState([]);
   const [mapping, setMapping] = useState({});
   const [name, setName] = useState("");
   const [err, setErr] = useState("");
+  const [ninja, setNinja] = useState(false);
 
   const onFile = (e) => {
     const f = e.target.files[0]; e.target.value = ""; if (!f) return;
@@ -1690,28 +1769,59 @@ function ImportForm({ onImport, onCancel }) {
       complete: (res) => {
         const fields = (res.meta.fields || []).filter(Boolean);
         if (!fields.length || !res.data.length) { setErr("V souboru se nepodařilo najít sloupce ani řádky. Má první řádek hlavičku?"); return; }
-        setCols(fields); setRows(res.data); setMapping(guessMapping(fields));
+        const isNT = isNinjaTrades(fields);
+        setNinja(isNT); setCols(fields); setRows(res.data);
+        if (!isNT) setMapping(guessMapping(fields));
       },
       error: () => setErr("Soubor se nepodařilo načíst."),
     });
   };
   const setMap = (field, col) => setMapping((m) => ({ ...m, [field]: col || undefined }));
   const ready = cols && rows.length > 0;
+  const grouped = useMemo(() => (ninja ? groupNinjaTrades(rows) : []), [ninja, rows]);
   const preview = rows.slice(0, 4);
 
   return (
-    <div className="overlay" onClick={onCancel}>
+    <div className="overlay">
       <div className="sheet wide" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-h"><h3>Import obchodů z CSV</h3><button className="x" onClick={onCancel}><X size={18} /></button></div>
+        <div className="sheet-h"><h3>Import obchodů</h3><button className="x" onClick={onCancel}><X size={18} /></button></div>
         <div className="sheet-b">
           {!ready ? (
             <>
-              <p className="hint-line">Nahraj CSV export z brokera nebo z Excelu. První řádek musí být hlavička se jmény sloupců. Po nahrání si namapuješ, který sloupec je co. Obchody se přidají do aktivního účtu.</p>
+              <p className="hint-line">Nahraj <b>export ze záložky Trades z NinjaTraderu</b> (pozná se sám a seskupí scale-outy do jednoho obchodu), nebo libovolné CSV z jiného nástroje. Obchody se přidají do aktivního účtu.</p>
               <label className="csv-drop">
                 <FileText size={26} />
                 <span>{err || "Vyber CSV soubor"}</span>
                 <input type="file" accept=".csv,text/csv" onChange={onFile} hidden />
               </label>
+            </>
+          ) : ninja ? (
+            <>
+              <div className="nt-badge">✓ Rozpoznán export z <b>NinjaTraderu</b> — sloupce se namapují automaticky.</div>
+              <div className="csv-file"><FileText size={15} /> {name}
+                <span className="muted">· {rows.length} řádků → <b>{grouped.length} {pluralObchod(grouped.length)}</b> po seskupení</span>
+                <button className="btn ghost sm" onClick={() => { setCols(null); setRows([]); setNinja(false); }}>Jiný soubor</button></div>
+              <div className="csv-prev">
+                <div className="csv-prev-h">Náhled (po seskupení podle vstupu)</div>
+                <table className="csv-table">
+                  <thead><tr><th>Datum</th><th>Symbol</th><th>Směr</th><th className="r">Kontr.</th><th className="r">Vstup → Výstup</th><th className="r">P&L</th><th className="r">MAE / MFE</th></tr></thead>
+                  <tbody>
+                    {grouped.slice(0, 6).map((g, i) => (
+                      <tr key={i}>
+                        <td>{g.date ? toLocalInput(g.date).replace("T", " ") : "—"}</td>
+                        <td><b>{g.symbol}</b></td>
+                        <td>{g.direction === "short" ? "Short" : "Long"}</td>
+                        <td className="r">{g.quantity}</td>
+                        <td className="r">{g.entryPrice} → {g.exitPrice}</td>
+                        <td className="r">{g.pnl} $</td>
+                        <td className="r">{g.mae} / {g.mfe}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {grouped.length > 6 && <div className="csv-more">…a dalších {grouped.length - 6}</div>}
+              </div>
+              <p className="hint-line" style={{ marginTop: 12 }}>P&L, risk a R se po importu počítají přes tick value instrumentů. Stop loss v exportu není, takže R u importovaných obchodů doplníš ručně, když budeš chtít.</p>
             </>
           ) : (
             <>
@@ -1751,7 +1861,8 @@ function ImportForm({ onImport, onCancel }) {
         </div>
         <div className="sheet-f">
           <button className="btn ghost" onClick={onCancel}>Zrušit</button>
-          {ready && <button className="btn primary" onClick={() => onImport(rows, mapping)}>Importovat {rows.length} {pluralObchod(rows.length)}</button>}
+          {ready && ninja && <button className="btn primary" onClick={() => onImportNinja(rows)}>Importovat {grouped.length} {pluralObchod(grouped.length)}</button>}
+          {ready && !ninja && <button className="btn primary" onClick={() => onImport(rows, mapping)}>Importovat {rows.length} {pluralObchod(rows.length)}</button>}
         </div>
       </div>
     </div>
@@ -1774,7 +1885,7 @@ function TradeForm({ initial, onSave, onCancel, cur, frameworks, onCreateFramewo
   const toggleRule = (rule) => setT({ ...t, ruleChecks: checks.includes(rule) ? checks.filter((x) => x !== rule) : [...checks, rule] });
 
   return (
-    <div className="overlay" onClick={onCancel}>
+    <div className="overlay">
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-h">
           <h3>{initial.symbol ? "Upravit obchod" : "Nový obchod"}</h3>
@@ -1882,7 +1993,7 @@ function FrameworkForm({ initial, onSave, onCancel }) {
   const setRule = (i, v) => { const n = [...f.rules]; n[i] = v; setF({ ...f, rules: n }); };
   const save = () => onSave({ ...f, rules: f.rules.map((r) => r.trim()).filter(Boolean) });
   return (
-    <div className="overlay" onClick={onCancel}>
+    <div className="overlay">
       <div className="sheet narrow" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-h"><h3>{initial.name ? "Upravit playbook" : "Nový playbook"}</h3><button className="x" onClick={onCancel}><X size={18} /></button></div>
         <div className="sheet-b">
@@ -1915,12 +2026,15 @@ function FrameworkForm({ initial, onSave, onCancel }) {
 function Field({ label, hint, children }) {
   return <label className="field"><span className="field-l">{label}{hint && <em> · {hint}</em>}</span>{children}</label>;
 }
-function EmptyState({ onAdd }) {
+function EmptyState({ onAdd, onImport }) {
   return (
     <div className="empty-hero"><div className="card empty-card center">
       <BookOpen size={26} /><h2>Začni zapisovat obchody</h2>
       <p>Po prvním obchodu uvidíš Zella Score, win rate, profit factor, equity křivku a kalendář. Tady se začíná hledat tvůj edge.</p>
-      <button className="btn primary" onClick={onAdd}><Plus size={16} /> Zapsat první obchod</button>
+      <div className="empty-btns">
+        <button className="btn primary" onClick={onAdd}><Plus size={16} /> Zapsat první obchod</button>
+        <button className="btn ghost" onClick={onImport}><FileText size={16} /> Import z NinjaTraderu / CSV</button>
+      </div>
     </div></div>
   );
 }
@@ -2218,6 +2332,9 @@ function Style() {
 .csv-table tr:last-child td{border-bottom:0;}
 
 .eq-head{display:flex;align-items:center;justify-content:space-between;}
+.nt-badge{background:#E9FBF1;color:#0F9D58;border:1px solid #BFEFD4;border-radius:9px;padding:9px 13px;font-size:13px;margin-bottom:12px;}
+.empty-btns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;}
+.csv-more{padding:8px 11px;font-size:12px;color:var(--muted);}
 .sm-seg{padding:2px;}
 .sm-seg .seg-btn{padding:5px 11px;font-size:12px;}
 
