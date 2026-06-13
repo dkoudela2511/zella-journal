@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Globální knihovna instrumentů (trhů) – tick size a tick value.
+// Spravuje pouze admin; ostatní uživatelé čtou read-only.
+model Instrument {
+  symbol    String  @id
+  name      String?
+  tickSize  Float
+  tickValue Float
+  currency  String  @default("USD")
+  sortOrder Int     @default(0)
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String
+  role      String   @default("student")
+  mentorId  String?
+  createdAt DateTime @default(now())
+  stores    Store[]
+}
+
+// Zvací kódy pro mentoring. Mentor vygeneruje kód, student ho zadá a tím se připojí.
+model InviteCode {
+  code      String    @id
+  mentorId  String
+  note      String?
+  usedById  String?
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([mentorId])
+}
+
+// Per-user key-value úložiště. Každý "key" (např. tz:trades:v1) drží JSON blob.
+// Mapuje 1:1 na to, jak prototyp ukládal data — jen teď per uživatel a v DB.
+model Store {
+  id     String @id @default(cuid())
+  userId String
+  key    String
+  value  String @db.Text
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([userId])
+}
