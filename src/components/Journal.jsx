@@ -364,7 +364,7 @@ const blankTrade = () => ({
   id: uid(), date: new Date().toISOString().slice(0, 16), symbol: "", direction: "long",
   frameworkId: "", entryPrice: "", exitPrice: "", quantity: "", stopLoss: "", fees: "", pnl: "", notes: "",
   tags: [], mistakes: [], rating: "", reviewed: false, missed: false, ruleChecks: [], mae: "", mfe: "",
-  accountId: "", shots: [], source: "manual",
+  accountId: "", shots: [], source: "manual", verified: false,
 });
 function fileToThumb(file, maxDim = 1100, quality = 0.62) {
   return new Promise((res, rej) => {
@@ -878,7 +878,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       </div>
 
       {editing && (
-        <TradeForm cur={cur} initial={editing} frameworks={frameworks}
+        <TradeForm cur={cur} initial={editing} frameworks={frameworks} accounts={accounts} isAdmin={isAdmin}
           onCancel={() => setEditing(null)} onSave={saveTrade} onCreateFramework={createFramework}
           onShowChart={(t) => setChartFor({ symbol: t.symbol, date: t.date })} />
       )}
@@ -942,7 +942,7 @@ function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode, trusted })
   // ověřené vs ruční + MAE/MFE
   const verif = useMemo(() => {
     let imported = 0, manual = 0;
-    trades.forEach((t) => { if (t.source === "manual") manual++; else imported++; });
+    trades.forEach((t) => { if (t.source === "manual" && !t.verified) manual++; else imported++; });
     const total = imported + manual;
     return { imported, manual, total, pct: total ? Math.round((imported / total) * 100) : 100 };
   }, [trades]);
@@ -973,7 +973,7 @@ function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode, trusted })
             {verif.manual > 0 && <i className="seg-man" style={{ width: `${(verif.manual / Math.max(1, verif.total)) * 100}%` }} />}
           </div>
           <div className="vs-legend">
-            <span><i className="dot imp" /> {verif.imported} importovaných z platformy</span>
+            <span><i className="dot imp" /> {verif.imported} ověřených</span>
             <span><i className="dot man" /> {verif.manual} ručních</span>
           </div>
         </div>
@@ -1144,9 +1144,9 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
                     <td className="sym">
                       {t.symbol || "—"}
                       {t.reviewed && <Check size={13} className="rev-check" />}
-                      {t.source === "manual"
+                      {t.source === "manual" && !t.verified
                         ? <span className="src-badge man" title="Zadáno ručně"><Pencil size={11} /></span>
-                        : <span className="src-badge imp" title={isAdmin ? "Importováno z platformy" : "Importováno z platformy — nelze editovat"}><ShieldCheck size={11} /></span>}
+                        : <span className="src-badge imp" title={t.source === "manual" ? "Ověřený obchod (doplněn ručně)" : (isAdmin ? "Importováno z platformy" : "Importováno z platformy — nelze editovat")}><ShieldCheck size={11} /></span>}
                     </td>
                     <td><span className={`dir ${t.direction}`}>{t.direction === "long" ? "LONG" : "SHORT"}</span></td>
                     <td>
@@ -2124,7 +2124,7 @@ function ImportForm({ onImport, onImportNinja, onCancel }) {
   );
 }
 
-function TradeForm({ initial, onSave, onCancel, cur, frameworks, onCreateFramework, onShowChart }) {
+function TradeForm({ initial, onSave, onCancel, cur, frameworks, onCreateFramework, onShowChart, accounts, isAdmin }) {
   const [t, setT] = useState(initial);
   const [adding, setAdding] = useState(false);
   const [newFw, setNewFw] = useState("");
@@ -2160,6 +2160,23 @@ function TradeForm({ initial, onSave, onCancel, cur, frameworks, onCreateFramewo
             <Field label="Symbol *"><input value={t.symbol} onChange={set("symbol")} placeholder="EURUSD, AAPL, BTC…" autoFocus /></Field>
             <Field label="Datum a čas"><input type="datetime-local" value={t.date} onChange={set("date")} /></Field>
           </div>
+
+          {accounts && accounts.length > 1 && (
+            <Field label="Účet">
+              <select value={t.accountId || ""} onChange={set("accountId")}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.currency}</option>)}
+              </select>
+            </Field>
+          )}
+
+          {isAdmin && t.source === "manual" && (
+            <Field label="Ověření">
+              <label className="verif-check">
+                <input type="checkbox" checked={!!t.verified} onChange={() => setT({ ...t, verified: !t.verified })} />
+                <span>Ověřený obchod — počítat jako ověřený (reálný obchod doplněný ručně, např. kvůli výpadku platformy)</span>
+              </label>
+            </Field>
+          )}
 
           <Field label="Playbook / strategie">
             {!adding ? (
