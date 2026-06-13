@@ -1938,12 +1938,22 @@ function ChipInput({ values, onChange, placeholder, tone }) {
 function ShotInput({ shots, onChange, large = false }) {
   const [view, setView] = useState(null);
   const [busy, setBusy] = useState(false);
-  const onPick = async (e) => {
-    const files = [...e.target.files]; e.target.value = "";
-    if (!files.length) return; setBusy(true);
+  const fileRef = useRef(null);
+  const addThumbs = async (fileList) => {
+    const imgs = [...fileList].filter((f) => f && f.type && f.type.startsWith("image/"));
+    if (!imgs.length) return;
+    setBusy(true);
     const thumbs = [];
-    for (const f of files) { try { thumbs.push(await fileToThumb(f)); } catch {} }
-    setBusy(false); onChange([...shots, ...thumbs]);
+    for (const f of imgs) { try { thumbs.push(await fileToThumb(f)); } catch {} }
+    setBusy(false);
+    if (thumbs.length) onChange([...shots, ...thumbs]);
+  };
+  const onPick = async (e) => { const files = [...e.target.files]; e.target.value = ""; await addThumbs(files); };
+  const onPaste = (e) => {
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    const files = [];
+    for (const it of items) { if (it.kind === "file" && it.type.startsWith("image/")) { const f = it.getAsFile(); if (f) files.push(f); } }
+    if (files.length) { e.preventDefault(); addThumbs(files); }
   };
   return (
     <>
@@ -1954,10 +1964,12 @@ function ShotInput({ shots, onChange, large = false }) {
             <button type="button" className="shot-del" onClick={() => onChange(shots.filter((_, j) => j !== i))}><X size={12} /></button>
           </div>
         ))}
-        <label className="shot-add">
-          <ImageIcon size={18} /><span>{busy ? "Zpracovávám…" : "Přidat screen"}</span>
-          <input type="file" accept="image/*" multiple onChange={onPick} hidden />
-        </label>
+        <div className="shot-add paste-zone" tabIndex={0} onPaste={onPaste} title="Klikni sem a vlož screen přes Ctrl+V (např. z Lightshotu), nebo nahraj soubor">
+          <ImageIcon size={18} />
+          <span>{busy ? "Zpracovávám…" : "Klikni + Ctrl+V"}</span>
+          <button type="button" className="shot-file-btn" onClick={(e) => { e.stopPropagation(); fileRef.current && fileRef.current.click(); }}>soubor</button>
+          <input ref={fileRef} type="file" accept="image/*" multiple onChange={onPick} hidden />
+        </div>
       </div>
       {view && <div className="lightbox" onClick={() => setView(null)}><img src={view} alt="" /><button className="lb-x" onClick={() => setView(null)}><X size={20} /></button></div>}
     </>
@@ -2471,8 +2483,10 @@ function PlanCard({ plan, frameworks, fwById, instruments, cur, onSave, onDelete
         return (
           <div className="plan-sec" key={sec.key}>
             <div className="plan-sec-h"><span className="plan-sec-n">{sec.letter}</span>{sec.label}</div>
-            <textarea rows={2} value={v.note || ""} onChange={(e) => setSec(sec.key, { note: e.target.value })} placeholder={sec.ph} />
-            <ShotInput large shots={v.shots || []} onChange={(shots) => setSec(sec.key, { shots })} />
+            <div className="plan-sec-body">
+              <textarea rows={4} value={v.note || ""} onChange={(e) => setSec(sec.key, { note: e.target.value })} placeholder={sec.ph} />
+              <ShotInput large shots={v.shots || []} onChange={(shots) => setSec(sec.key, { shots })} />
+            </div>
           </div>
         );
       })}
@@ -2562,8 +2576,12 @@ function Style() {
 .shot{position:relative;width:84px;height:64px;border-radius:9px;overflow:hidden;border:1px solid var(--line);}
 .shot img{width:100%;height:100%;object-fit:cover;cursor:zoom-in;display:block;}
 .shot-del{position:absolute;top:3px;right:3px;background:rgba(10,12,20,.72);border:0;color:#fff;border-radius:6px;width:20px;height:20px;display:grid;place-items:center;cursor:pointer;}
-.shot-add{width:84px;height:64px;border:1.5px dashed var(--line);border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--muted);cursor:pointer;font-size:11px;}
+.shot-add{width:84px;height:64px;border:1.5px dashed var(--line);border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--muted);cursor:pointer;font-size:11px;text-align:center;}
 .shot-add:hover{border-color:var(--accent);color:var(--accent);}
+.paste-zone{outline:none;}
+.paste-zone:focus{border-color:var(--accent);border-style:solid;color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+.shot-file-btn{background:none;border:none;color:var(--soft);text-decoration:underline;cursor:pointer;font-size:10px;padding:0;margin-top:1px;}
+.shot-file-btn:hover{color:var(--accent);}
 .lightbox{position:fixed;inset:0;background:rgba(8,10,18,.86);display:flex;align-items:center;justify-content:center;z-index:1200;padding:32px;cursor:zoom-out;}
 .lightbox img{max-width:100%;max-height:100%;border-radius:10px;}
 .lb-x{position:absolute;top:20px;right:24px;background:rgba(255,255,255,.12);border:0;color:#fff;width:38px;height:38px;border-radius:10px;display:grid;place-items:center;cursor:pointer;}
@@ -2882,6 +2900,9 @@ function Style() {
 .plan-basics label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
 .plan-basics select{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-family:inherit;font-size:13.5px;background:#fff;color:var(--text);}
 .plan-sec{padding:14px 16px;border-bottom:1px solid var(--line2);}
+.plan-sec-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;}
+.plan-sec-body textarea{min-height:120px;}
+@media (max-width:760px){ .plan-sec-body{grid-template-columns:1fr;} }
 .plan-sec-h{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;margin-bottom:9px;}
 .plan-sec-n{width:18px;height:18px;border-radius:50%;background:#F7EFD6;color:#17386F;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;}
 .plan-sec textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-family:inherit;font-size:13.5px;resize:vertical;line-height:1.5;}
