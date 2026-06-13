@@ -1096,7 +1096,7 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
               {sorted.map((t) => {
                 const p = computePnl(t), r = computeR(t), f = fwById[t.frameworkId];
                 return (
-                  <tr key={t.id} className={`${t.missed ? "row-missed" : ""} ${sel.has(t.id) ? "row-sel" : ""}`} onClick={() => onEdit(t)}>
+                  <tr key={t.id} className={`${t.missed ? "row-missed" : ""} ${sel.has(t.id) ? "row-sel" : ""} ${t.source === "manual" ? "" : "row-locked"}`} onClick={() => { if (t.source === "manual") onEdit(t); }}>
                     <td className="chk" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(t.id)} onChange={() => toggle(t.id)} /></td>
                     <td className="mut">{fmtDate(t.date)}</td>
                     <td className="sym">
@@ -1104,7 +1104,7 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
                       {t.reviewed && <Check size={13} className="rev-check" />}
                       {t.source === "manual"
                         ? <span className="src-badge man" title="Zadáno ručně"><Pencil size={11} /></span>
-                        : <span className="src-badge imp" title="Importováno z platformy"><ShieldCheck size={11} /></span>}
+                        : <span className="src-badge imp" title="Importováno z platformy — nelze editovat"><ShieldCheck size={11} /></span>}
                     </td>
                     <td><span className={`dir ${t.direction}`}>{t.direction === "long" ? "LONG" : "SHORT"}</span></td>
                     <td>
@@ -1119,7 +1119,9 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
                     <td className={`r n strong ${t.missed ? "mut" : p >= 0 ? "pos" : "neg"}`}>{fmtMoney(p, cur)}</td>
                     <td className="act" onClick={(e) => e.stopPropagation()}>
                       <button title="Graf" onClick={() => onChart(t)}><BarChart3 size={14} /></button>
-                      <button title="Upravit" onClick={() => onEdit(t)}><Pencil size={14} /></button>
+                      {t.source === "manual"
+                        ? <button title="Upravit" onClick={() => onEdit(t)}><Pencil size={14} /></button>
+                        : <button title="Importovaný obchod nelze editovat" className="locked-btn" disabled><Lock size={14} /></button>}
                       <button title="Smazat" onClick={() => onDelete(t.id)}><Trash2 size={14} /></button>
                     </td>
                   </tr>
@@ -1204,7 +1206,7 @@ function DayCard({ dk, trades, fwById, cur, note, onSaveNote, onEditTrade, onAdd
             {ordered.map((t) => {
               const p = computePnl(t), r = computeR(t), f = fwById[t.frameworkId];
               return (
-                <div className="dt-row" key={t.id} onClick={() => onEditTrade(t)}>
+                <div className={`dt-row ${t.source === "manual" ? "" : "row-locked"}`} key={t.id} onClick={() => { if (t.source === "manual") onEditTrade(t); }}>
                   <span className={`pill ${t.direction}`}>{t.direction === "long" ? "L" : "S"}</span>
                   <span className="dt-time">{new Date(t.date).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}</span>
                   <span className="dt-sym">{t.symbol || "—"}</span>
@@ -2519,8 +2521,8 @@ function Style() {
 .stack{padding:24px 28px;display:flex;flex-direction:column;gap:18px;}
 
 /* dashboard */
-.grid-dash{padding:24px 28px;display:grid;gap:18px;grid-template-columns:340px 1fr;grid-template-areas:'verif verif' 'score kpis' 'equity equity' 'cal cal' 'recent recent';}
-.dash-cal{grid-area:cal;}
+.grid-dash{padding:24px 28px;display:grid;gap:18px;align-items:start;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:'verif verif' 'kpis kpis' 'equity cal' 'score recent';}
+.dash-cal{grid-area:cal;align-self:start;}
 .dash-cal .cal-card{padding:14px 16px;}
 .dash-cal .cal-grid{gap:4px;margin-bottom:4px;}
 .dash-cal .cal-cell{aspect-ratio:auto;min-height:0;height:58px;padding:4px 6px;border-radius:7px;gap:0;overflow:hidden;justify-content:space-between;}
@@ -2532,14 +2534,14 @@ function Style() {
 .dash-cal .cal-head{margin-bottom:10px;}
 .dash-cal .cal-dow{font-size:10px;}
 .score-card{grid-area:score;}
-.kpis{grid-area:kpis;display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.kpis{grid-area:kpis;display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:14px;}
 .equity-card{grid-area:equity;padding-bottom:14px;}
 .recent-card{grid-area:recent;}
-.score-body{display:flex;align-items:center;gap:6px;padding:6px 14px 18px;}
+.score-body{display:flex;align-items:center;justify-content:center;gap:18px;padding:6px 14px 18px;}
 .gauge{flex-shrink:0;}
 .g-num{font-size:30px;font-weight:700;}
 .g-lbl{font-size:11px;fill:var(--muted);}
-.radar{flex:1;min-width:0;}
+.radar{flex:1;min-width:0;max-width:400px;}
 
 .kpi{padding:16px 18px;display:flex;flex-direction:column;gap:5px;justify-content:center;}
 .kpi-l{font-size:12px;color:var(--muted);font-weight:500;}
@@ -2853,6 +2855,11 @@ function Style() {
 .tbl th.chk,.tbl td.chk{width:34px;text-align:center;padding-left:14px;}
 .tbl td.chk input,.tbl th.chk input{width:15px;height:15px;cursor:pointer;accent-color:var(--accent);}
 .tbl tr.row-sel{background:#F3F6FC;}
+.tbl tr.row-locked{cursor:default;}
+.tbl tr.row-locked:hover{background:transparent;}
+.dt-row.row-locked{cursor:default;}
+.dt-row.row-locked:hover{background:transparent;}
+.act .locked-btn{opacity:.4;cursor:not-allowed;}
 .src-badge{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:5px;margin-left:6px;vertical-align:middle;}
 .src-badge.imp{background:#EAF4EF;color:#0F8A5A;}
 .src-badge.man{background:#F3F0E6;color:#A67C18;}
