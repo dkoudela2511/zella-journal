@@ -4,7 +4,7 @@ import {
   Plus, Pencil, Trash2, X, Search, TrendingUp, TrendingDown, LayoutDashboard,
   BookOpen, CalendarDays, Layers, ChevronLeft, ChevronRight, ChevronDown, Wallet, Target,
   ClipboardList, FileText, NotebookText, BarChart3, Check, ListChecks, Settings, Image as ImageIcon,
-  GraduationCap, Lock,
+  GraduationCap, Lock, ShieldCheck, AlertTriangle,
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine,
@@ -362,7 +362,7 @@ const blankTrade = () => ({
   id: uid(), date: new Date().toISOString().slice(0, 16), symbol: "", direction: "long",
   frameworkId: "", entryPrice: "", exitPrice: "", quantity: "", stopLoss: "", fees: "", pnl: "", notes: "",
   tags: [], mistakes: [], rating: "", reviewed: false, missed: false, ruleChecks: [], mae: "", mfe: "",
-  accountId: "", shots: [],
+  accountId: "", shots: [], source: "manual",
 });
 function fileToThumb(file, maxDim = 1100, quality = 0.62) {
   return new Promise((res, rej) => {
@@ -453,6 +453,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
   const [mentorTrades, setMentorTrades] = useState([]);
   const [mentorTab, setMentorTab] = useState("plans");
   const [editingMTrade, setEditingMTrade] = useState(null);
+  const [editingMImport, setEditingMImport] = useState(false);
   const [instrumentsList, setInstrumentsList] = useState([]);
 
   /* načtení + migrace setup -> framework + účty */
@@ -630,6 +631,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       t.notes = String(get("notes") || "");
       const tagsRaw = String(get("tags") || ""); t.tags = tagsRaw ? tagsRaw.split(/[;,]/).map((s) => s.trim()).filter(Boolean) : [];
       const pb = String(get("playbook") || ""); if (pb) t.frameworkId = getFw(pb);
+      t.source = "imported";
       return t;
     });
     if (fws.length !== frameworks.length) persistF(fws);
@@ -656,11 +658,71 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       t.fees = g.fees; t.mae = g.mae; t.mfe = g.mfe; t.pnl = g.pnl;
       t.reviewed = false;
       if (g.strategy) t.frameworkId = getFw(g.strategy);
+      t.source = "imported";
       return t;
     });
     if (fws.length !== frameworks.length) persistF(fws);
     persistT([...trades, ...made]);
     setEditingImport(false);
+    return made.length;
+  };
+
+  // Import do DOZOROVANÝCH obchodů (mentoring) — vždy "importováno", nelze zadat ručně
+  const buildFromNinja = (rawRows) => {
+    let fws = [...frameworks];
+    const fwByName = {}; fws.forEach((f) => (fwByName[f.name.toLowerCase()] = f));
+    const getFw = (name) => {
+      const k = (name || "").trim().toLowerCase(); if (!k) return "";
+      let f = fwByName[k];
+      if (!f) { f = { id: uid(), name: name.trim(), description: "", color: FW_COLORS[fws.length % FW_COLORS.length], rules: [] }; fws.push(f); fwByName[k] = f; }
+      return f.id;
+    };
+    const made = groupNinjaTrades(rawRows).map((g) => {
+      const t = blankTrade(); t.accountId = activeAcc;
+      t.symbol = g.symbol; t.direction = g.direction; t.quantity = g.quantity;
+      t.entryPrice = g.entryPrice; t.exitPrice = g.exitPrice;
+      t.date = g.date ? toLocalInput(g.date) : toLocalInput(new Date());
+      t.fees = g.fees; t.mae = g.mae; t.mfe = g.mfe; t.pnl = g.pnl;
+      if (g.strategy) t.frameworkId = getFw(g.strategy);
+      t.source = "imported";
+      return t;
+    });
+    if (fws.length !== frameworks.length) persistF(fws);
+    return made;
+  };
+  const importNinjaToMentor = (rawRows) => {
+    const made = buildFromNinja(rawRows);
+    persistMentorTrades([...made, ...mentorTrades]);
+    setEditingMImport(false);
+    return made.length;
+  };
+  const importCsvToMentor = (rows, mapping) => {
+    let fws = [...frameworks];
+    const fwByName = {}; fws.forEach((f) => (fwByName[f.name.toLowerCase()] = f));
+    const getFw = (name) => {
+      const k = (name || "").trim().toLowerCase(); if (!k) return "";
+      let f = fwByName[k];
+      if (!f) { f = { id: uid(), name: name.trim(), description: "", color: FW_COLORS[fws.length % FW_COLORS.length], rules: [] }; fws.push(f); fwByName[k] = f; }
+      return f.id;
+    };
+    const made = rows.map((row) => {
+      const get = (field) => (mapping[field] ? row[mapping[field]] : "");
+      const t = blankTrade(); t.accountId = activeAcc;
+      const rawDate = get("date"); const d = rawDate ? new Date(rawDate) : new Date();
+      t.date = isNaN(d) ? toLocalInput(new Date()) : toLocalInput(d);
+      t.symbol = String(get("symbol") || "").trim();
+      const dv = String(get("direction") || "").trim().toLowerCase();
+      t.direction = (dv.includes("short") || dv.includes("sell") || dv === "s") ? "short" : "long";
+      t.entryPrice = parseNumStr(get("entryPrice")); t.exitPrice = parseNumStr(get("exitPrice")); t.quantity = parseNumStr(get("quantity"));
+      t.stopLoss = parseNumStr(get("stopLoss")); t.fees = parseNumStr(get("fees")); t.pnl = parseNumStr(get("pnl"));
+      t.mae = parseNumStr(get("mae")); t.mfe = parseNumStr(get("mfe"));
+      const pb = String(get("playbook") || ""); if (pb) t.frameworkId = getFw(pb);
+      t.source = "imported";
+      return t;
+    });
+    if (fws.length !== frameworks.length) persistF(fws);
+    persistMentorTrades([...made, ...mentorTrades]);
+    setEditingMImport(false);
     return made.length;
   };
 
@@ -768,8 +830,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
                 plans={mentorPlans} mtrades={mentorTrades} fwById={fwById} frameworks={frameworks} instruments={instrumentsList} cur={cur} mentorName={mentorName}
                 tab={mentorTab} setTab={setMentorTab}
                 onSavePlan={saveMentorPlan} onNewPlan={newMentorPlan} onDeletePlan={deleteMentorPlan}
-                onAddTrade={() => setEditingMTrade({ ...blankTrade(), accountId: activeAcc })}
-                onEditTrade={(t) => setEditingMTrade({ ...t })} onDeleteTrade={deleteMentorTrade} />
+                onImportTrades={() => setEditingMImport(true)} onDeleteTrade={deleteMentorTrade} />
           )
           : <ProgressView progress={progress} trades={realTrades} onToggle={toggleRuleDay} onEditRules={() => setEditingRules(true)} />}
       </div>
@@ -802,6 +863,9 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
           onCancel={() => setEditingMTrade(null)} onSave={saveMentorTrade} onCreateFramework={createFramework}
           onShowChart={(t) => setChartFor({ symbol: t.symbol, date: t.date })} />
       )}
+      {editingMImport && (
+        <ImportForm onImport={importCsvToMentor} onImportNinja={importNinjaToMentor} onCancel={() => setEditingMImport(false)} />
+      )}
       {chartFor && (
         <ChartModal symbol={chartFor.symbol} date={chartFor.date} onClose={() => setChartFor(null)} />
       )}
@@ -833,8 +897,40 @@ function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode }) {
   const netDisplay = isR ? `${sumR >= 0 ? "+" : ""}${fmtNum(sumR, 1)}R` : fmtMoney(stats.net, cur);
   const expDisplay = isR ? `${avgR >= 0 ? "+" : ""}${fmtNum(avgR, 2)}R` : fmtMoney(stats.expectancy, cur);
 
+  // ověřené vs ruční + MAE/MFE
+  const verif = useMemo(() => {
+    let imported = 0, manual = 0;
+    trades.forEach((t) => { if (t.source === "imported") imported++; else manual++; });
+    const total = imported + manual;
+    return { imported, manual, total, pct: total ? Math.round((imported / total) * 100) : 100 };
+  }, [trades]);
+  const mm = useMemo(() => {
+    let sMae = 0, nMae = 0, sMfe = 0, nMfe = 0;
+    trades.forEach((t) => {
+      const a = num(t.mae), f = num(t.mfe);
+      if (isFinite(a)) { sMae += Math.abs(a); nMae++; }
+      if (isFinite(f)) { sMfe += Math.abs(f); nMfe++; }
+    });
+    const avgMae = nMae ? sMae / nMae : null;
+    const avgMfe = nMfe ? sMfe / nMfe : null;
+    const eff = nMfe && sMfe > 0 ? Math.max(0, Math.min(100, (stats.net / sMfe) * 100)) : null;
+    return { avgMae, avgMfe, eff, has: nMae > 0 || nMfe > 0 };
+  }, [trades, stats.net]);
+
   return (
     <div className="grid-dash">
+      <div className={`verif-strip ${verif.manual > 0 ? "warn" : "ok"}`}>
+        {verif.manual > 0 ? <AlertTriangle size={18} /> : <ShieldCheck size={18} />}
+        <div className="vs-text">
+          <b>{verif.manual > 0 ? `Pozor — ${verif.manual} ${verif.manual === 1 ? "ruční obchod" : verif.manual <= 4 ? "ruční obchody" : "ručních obchodů"}` : "Vše ověřeno importem"}</b>
+          <span>{verif.imported} importovaných · {verif.manual} ručních</span>
+        </div>
+        <div className="vs-pct">
+          <span className="vs-bar"><i style={{ width: `${verif.pct}%` }} /></span>
+          <b>{verif.pct} % ověřeno</b>
+        </div>
+      </div>
+
       <div className="card score-card">
         <div className="card-h">Zella Score</div>
         <div className="score-body">
@@ -856,6 +952,9 @@ function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode }) {
         <Kpi label="Expectancy" value={expDisplay} tone={(isR ? avgR : stats.expectancy) >= 0 ? "pos" : "neg"} sub="na obchod" />
         <Kpi label="Max drawdown" value={fmtMoney(-stats.maxDD, cur)} tone="neg" />
         <Kpi label="Prům. W/L" value={`${fmtMoney(stats.avgWin, cur)} / ${fmtMoney(-stats.avgLoss, cur)}`} />
+        {mm.avgMfe != null && <Kpi label="Ø MFE" value={fmtMoney(mm.avgMfe, cur)} tone="pos" sub="max pro tebe" />}
+        {mm.avgMae != null && <Kpi label="Ø MAE" value={fmtMoney(-mm.avgMae, cur)} tone="neg" sub="max proti" />}
+        {mm.eff != null && <Kpi label="Efektivita" value={`${fmtNum(mm.eff, 0)} %`} sub="z příznivého pohybu" />}
       </div>
 
       <div className="card equity-card">
@@ -972,6 +1071,9 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
                     <td className="sym">
                       {t.symbol || "—"}
                       {t.reviewed && <Check size={13} className="rev-check" />}
+                      {t.source === "imported"
+                        ? <span className="src-badge imp" title="Importováno z platformy"><ShieldCheck size={11} /></span>
+                        : <span className="src-badge man" title="Zadáno ručně"><Pencil size={11} /></span>}
                     </td>
                     <td><span className={`dir ${t.direction}`}>{t.direction === "long" ? "LONG" : "SHORT"}</span></td>
                     <td>
@@ -2141,7 +2243,7 @@ const PLAN_SECTIONS = [
   { key: "auction", letter: "c", label: "Stav aukce", ph: "Kdo má kontrolu, kam se aukce rozšiřuje…" },
 ];
 
-function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, mentorName, tab, setTab, onSavePlan, onNewPlan, onDeletePlan, onAddTrade, onEditTrade, onDeleteTrade }) {
+function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, mentorName, tab, setTab, onSavePlan, onNewPlan, onDeletePlan, onImportTrades, onDeleteTrade }) {
   const sortedPlans = useMemo(
     () => [...plans].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""))),
     [plans]
@@ -2187,10 +2289,11 @@ function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, m
               <span>Net <b className={s.net >= 0 ? "pos" : "neg"}>{s.n ? fmtMoney(s.net, cur) : "—"}</b></span>
               <span>Win rate <b>{s.n ? `${fmtNum(s.winRate, 0)} %` : "—"}</b></span>
             </div>
-            <button className="btn primary sm" onClick={onAddTrade}><Plus size={14} /> Přidat dozorovaný obchod</button>
+            <button className="btn primary sm" onClick={onImportTrades}><Plus size={14} /> Importovat z platformy</button>
           </div>
+          <div className="import-note"><ShieldCheck size={14} /> Dozorované obchody jdou jen <b>importovat z platformy</b> — ručně je zadat nelze, aby byly ověřené.</div>
           {mtrades.length === 0 ? (
-            <div className="card empty-card center"><p>Zatím žádné dozorované obchody. Sem zapisuj jen obchody, které řešíš s mentorem — má je vidět odděleně od tvého osobního deníku.</p></div>
+            <div className="card empty-card center"><p>Zatím žádné dozorované obchody. Naimportuj je z platformy (NinjaTrader CSV) — uloží se jako ověřené a oddělené od osobního deníku.</p></div>
           ) : (
             <div className="card">
               <table className="mtr-tbl">
@@ -2200,14 +2303,13 @@ function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, m
                     const p = computePnl(t), r = computeR(t), f = fwById[t.frameworkId];
                     return (
                       <tr key={t.id}>
-                        <td>{fmtDate(t.date)}</td>
+                        <td>{fmtDate(t.date)} <span className="src-badge imp" title="Importováno z platformy"><ShieldCheck size={11} /></span></td>
                         <td>{t.symbol || "—"}</td>
                         <td><span className={`pill ${t.direction}`}>{t.direction === "long" ? "L" : "S"}</span></td>
                         <td>{f ? <><i className="fdot" style={{ background: f.color }} />{f.name}</> : "—"}</td>
                         <td className={`r ${p >= 0 ? "pos" : "neg"}`}>{fmtMoney(p, cur)}</td>
                         <td className="r">{isFinite(r) ? `${fmtNum(r, 2)}R` : "—"}</td>
                         <td className="r nowrap">
-                          <button className="ic-btn" onClick={() => onEditTrade(t)}><Pencil size={14} /></button>
                           <button className="ic-btn" onClick={() => onDeleteTrade(t.id)}><Trash2 size={14} /></button>
                         </td>
                       </tr>
@@ -2682,6 +2784,24 @@ function Style() {
 .mtr-tbl td.nowrap{white-space:nowrap;}
 .ic-btn{background:none;border:none;color:var(--muted);cursor:pointer;padding:4px;border-radius:6px;}
 .ic-btn:hover{background:var(--line2);color:var(--text);}
+.verif-strip{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:12px;border:1px solid var(--line);background:var(--card);}
+.verif-strip.ok{border-color:#BFE6D2;background:#F1FBF6;color:#0F8A5A;}
+.verif-strip.warn{border-color:#F0DDB0;background:#FFF8EC;color:#9A6A12;}
+.verif-strip svg{flex-shrink:0;}
+.vs-text{display:flex;flex-direction:column;line-height:1.3;}
+.vs-text b{font-size:13.5px;}
+.vs-text span{font-size:12px;color:var(--soft);}
+.vs-pct{margin-left:auto;display:flex;align-items:center;gap:10px;}
+.vs-pct b{font-size:12.5px;white-space:nowrap;}
+.vs-bar{width:120px;height:7px;border-radius:5px;background:#E7EAF2;overflow:hidden;}
+.vs-bar i{display:block;height:100%;background:var(--gold);}
+.verif-strip.ok .vs-bar i{background:#16A06A;}
+.src-badge{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:5px;margin-left:6px;vertical-align:middle;}
+.src-badge.imp{background:#EAF4EF;color:#0F8A5A;}
+.src-badge.man{background:#F3F0E6;color:#A67C18;}
+.import-note{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--soft);background:#F7F8FB;border:1px solid var(--line);border-radius:9px;padding:8px 11px;}
+.import-note svg{color:var(--gold);flex-shrink:0;}
+.import-note b{color:var(--text);}
 @media(max-width:760px){.plan-grid{grid-template-columns:1fr;}}
 .sm-seg{padding:2px;}
 .sm-seg .seg-btn{padding:5px 11px;font-size:12px;}
