@@ -63,7 +63,7 @@ export default function AdminPanel() {
   return (
     <div className="admin-wrap">
       <div className="admin-top">
-        <div className="admin-brand"><span className="auth-mark" /><span>REAL EDGE — Mentor</span></div>
+        <div className="admin-brand"><img className="admin-logo" src="/real-edge-logo.png" alt="REAL EDGE" /><span>Mentor</span></div>
         <div className="admin-actions">
           <Link href="/admin/instruments" className="admin-link">Instrumenty</Link>
           <Link href="/app" className="admin-link">Můj deník</Link>

@@ -711,7 +711,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       <Style />
       {/* sidebar */}
       <aside className="side">
-        <div className="brand"><span className="mark" /><span className="bname">REAL <i>EDGE</i></span></div>
+        <div className="brand"><img className="brand-logo" src="/real-edge-logo.png" alt="REAL EDGE" /></div>
         <nav>
           {NAV.map((n) => (
             <button key={n.id} className={`nav-i ${view === n.id ? "on" : ""}`} onClick={() => setView(n.id)}>
@@ -2333,8 +2333,9 @@ function Style() {
 
 /* sidebar */
 .side{width:220px;flex-shrink:0;background:var(--navy);border-right:1px solid var(--navy-deep);display:flex;flex-direction:column;padding:18px 14px;position:sticky;top:0;height:100vh;}
-.brand{display:flex;align-items:center;gap:10px;padding:6px 6px 22px;}
-.mark{width:34px;height:34px;border-radius:9px;flex-shrink:0;background:#0A1733 url('/real-edge-logo.png') center 23% / 205% no-repeat;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);}
+.brand{display:flex;justify-content:center;padding:6px 4px 20px;}
+.brand-logo{display:block;width:100%;max-width:188px;height:auto;border-radius:8px;}
+.mark{display:none;}
 .bname{font-weight:700;font-size:15px;letter-spacing:.06em;color:#fff;}
 .bname i{font-style:normal;color:var(--gold);font-weight:700;}
 .side nav{display:flex;flex-direction:column;gap:3px;flex:1;}
