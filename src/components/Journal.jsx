@@ -2521,6 +2521,16 @@ function Style() {
 /* dashboard */
 .grid-dash{padding:24px 28px;display:grid;gap:18px;grid-template-columns:340px 1fr;grid-template-areas:'verif verif' 'score kpis' 'equity equity' 'cal cal' 'recent recent';}
 .dash-cal{grid-area:cal;}
+.dash-cal .cal-card{padding:14px 16px;}
+.dash-cal .cal-grid{gap:4px;margin-bottom:4px;}
+.dash-cal .cal-cell{aspect-ratio:auto;min-height:0;height:58px;padding:4px 6px;border-radius:7px;gap:0;overflow:hidden;justify-content:space-between;}
+.dash-cal .cal-cell.empty-cell{height:58px;}
+.dash-cal .cal-d{font-size:10.5px;}
+.dash-cal .cal-pnl{font-size:11px;margin-top:0;line-height:1.2;}
+.dash-cal .cal-n{font-size:8.5px;line-height:1.1;}
+.dash-cal .cal-wl{font-size:8.5px;}
+.dash-cal .cal-head{margin-bottom:10px;}
+.dash-cal .cal-dow{font-size:10px;}
 .score-card{grid-area:score;}
 .kpis{grid-area:kpis;display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
 .equity-card{grid-area:equity;padding-bottom:14px;}
