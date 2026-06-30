@@ -842,7 +842,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       <div className="content">
         <header className="topbar">
           <h1>{NAV.find((n) => n.id === view)?.label}</h1>
-          <button className="btn primary" onClick={() => setEditing(newTrade())}><Plus size={16} /> Nový obchod</button>
+          {view !== "mentoring" && <button className="btn primary" onClick={() => setEditing(newTrade())}><Plus size={16} /> Nový obchod</button>}
         </header>
 
         {!loaded ? <div className="empty">Načítám…</div>
@@ -2374,6 +2374,7 @@ function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, m
     return c;
   }, [plans]);
   const s = computeStats(mtrades.filter((t) => !t.missed));
+  const [mdMode, setMdMode] = useState("$");
 
   return (
     <div className="stack mentoring">
@@ -2404,19 +2405,18 @@ function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, m
       ) : (
         <>
           <div className="mtr-bar">
-            <div className="mtr-stats">
-              <span>Obchodů <b>{s.n}</b></span>
-              <span>Net <b className={s.net >= 0 ? "pos" : "neg"}>{s.n ? fmtMoney(s.net, cur) : "—"}</b></span>
-              <span>Win rate <b>{s.n ? `${fmtNum(s.winRate, 0)} %` : "—"}</b></span>
-            </div>
+            <span className="mtr-count">{s.n} {pluralObchod(s.n)}{s.n ? <> · <b>{fmtNum(s.winRate, 0)} % WR</b></> : ""}</span>
             <button className="btn primary sm" onClick={onImportTrades}><Plus size={14} /> Importovat z platformy</button>
           </div>
           <div className="import-note"><ShieldCheck size={14} /> Dozorované obchody jdou jen <b>importovat z platformy</b> — ručně je zadat nelze, aby byly ověřené.</div>
           {mtrades.length === 0 ? (
             <div className="card empty-card center"><p>Zatím žádné dozorované obchody. Naimportuj je z platformy (NinjaTrader CSV) — uloží se jako ověřené a oddělené od osobního deníku.</p></div>
           ) : (
-            <div className="card">
-              <table className="mtr-tbl">
+            <>
+              <Dashboard stats={s} trades={mtrades.filter((t) => !t.missed)} cur={cur} fwById={fwById} mode={mdMode} onMode={setMdMode} trusted={true} />
+              <div className="card mtr-tbl-card">
+                <div className="card-h">Všechny dozorované obchody</div>
+                <table className="mtr-tbl">
                 <thead><tr><th>Datum</th><th>Symbol</th><th>Směr</th><th>Playbook</th><th className="r">P&L</th><th className="r">R</th><th></th></tr></thead>
                 <tbody>
                   {[...mtrades].sort((a, b) => new Date(b.date) - new Date(a.date)).map((t) => {
@@ -2437,7 +2437,8 @@ function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, m
                   })}
                 </tbody>
               </table>
-            </div>
+              </div>
+            </>
           )}
         </>
       )}
@@ -2876,6 +2877,10 @@ function Style() {
 .mtr-tabs button{background:none;border:none;padding:9px 14px;font-family:inherit;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;}
 .mtr-tabs button.on{color:var(--text);border-bottom-color:var(--gold);}
 .mtr-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;}
+.mtr-count{font-size:13px;color:var(--muted);}
+.mtr-count b{color:var(--text);}
+.mtr-tbl-card{margin-top:16px;}
+.mtr-tbl-card .card-h{margin-bottom:10px;}
 .mtr-stats{display:flex;gap:16px;font-size:13px;color:var(--soft);}
 .mtr-stats b{color:var(--text);}
 .btn.sm{padding:7px 12px;font-size:13px;}
