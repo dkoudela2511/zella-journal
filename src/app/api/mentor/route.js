@@ -6,6 +6,7 @@ import { summarize, instrumentMap } from "@/lib/stats";
 
 const SEEN_KEY = "tz:mentor:seen:v1";
 const TRUST_KEY = "tz:mentor:trust:v1";
+const PLAYBOOKS_KEY = "tz:mentor:playbooks:v1";
 
 function genCode() {
   const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -30,6 +31,12 @@ async function getTrustMap(mentorId) {
   const row = await prisma.store.findUnique({ where: { userId_key: { userId: mentorId, key: TRUST_KEY } } });
   if (!row) return {};
   try { return JSON.parse(row.value) || {}; } catch { return {}; }
+}
+
+async function getPlaybooks(mentorId) {
+  const row = await prisma.store.findUnique({ where: { userId_key: { userId: mentorId, key: PLAYBOOKS_KEY } } });
+  if (!row) return [];
+  try { const v = JSON.parse(row.value); return Array.isArray(v) ? v : []; } catch { return []; }
 }
 
 export async function GET() {
@@ -86,7 +93,8 @@ export async function GET() {
     usedByName: c.usedById ? (usersById[c.usedById]?.name || usersById[c.usedById]?.email || "—") : null,
   }));
 
-  return NextResponse.json({ codes: codeList, students: studentList, totalNew });
+  const playbooks = await getPlaybooks(me.id);
+  return NextResponse.json({ codes: codeList, students: studentList, totalNew, playbooks });
 }
 
 export async function POST(req) {
@@ -143,6 +151,25 @@ export async function POST(req) {
       create: { userId: me.id, key: TRUST_KEY, value: JSON.stringify(trust) },
     });
     return NextResponse.json({ ok: true, trusted: !!body.trusted });
+  }
+
+  if (action === "playbooks") {
+    const list = Array.isArray(body.playbooks) ? body.playbooks : [];
+    const clean = list
+      .filter((p) => p && typeof p.name === "string" && p.name.trim())
+      .slice(0, 30)
+      .map((p) => ({
+        id: String(p.id || "").slice(0, 40) || (Date.now().toString(36) + Math.random().toString(36).slice(2, 8)),
+        name: String(p.name).trim().slice(0, 60),
+        description: String(p.description || "").slice(0, 500),
+        color: String(p.color || "").slice(0, 16),
+      }));
+    await prisma.store.upsert({
+      where: { userId_key: { userId: me.id, key: PLAYBOOKS_KEY } },
+      update: { value: JSON.stringify(clean) },
+      create: { userId: me.id, key: PLAYBOOKS_KEY, value: JSON.stringify(clean) },
+    });
+    return NextResponse.json({ ok: true, playbooks: clean });
   }
 
   return NextResponse.json({ error: "unknown action" }, { status: 400 });

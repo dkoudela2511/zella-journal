@@ -28,11 +28,20 @@ export async function GET(req) {
 
   const instruments = await prisma.instrument.findMany();
 
+  // playbooky mentora (kvůli názvům frameworků v plánech studenta) + vlastní frameworky studenta (kvůli dozorovaným obchodům)
+  let mentorPb = [];
+  try {
+    const pbRow = await prisma.store.findUnique({ where: { userId_key: { userId: session.user.id, key: "tz:mentor:playbooks:v1" } } });
+    if (pbRow) { const v = JSON.parse(pbRow.value); mentorPb = Array.isArray(v) ? v : []; }
+  } catch {}
+  const studentFw = data["tz:frameworks:v1"] || [];
+  const mergedFw = [...mentorPb, ...studentFw.filter((f) => !mentorPb.some((p) => p.id === f.id))];
+
   return NextResponse.json({
     user,
     trades: data["tz:trades:v1"] || [],
     accounts: data["tz:accounts:v1"] || [],
-    frameworks: data["tz:frameworks:v1"] || [],
+    frameworks: mergedFw,
     mentorTrades: data["tz:mentor:trades:v1"] || [],
     mentorPlans: Array.isArray(data["tz:mentor:plans:v1"]) ? data["tz:mentor:plans:v1"] : [],
     instruments,

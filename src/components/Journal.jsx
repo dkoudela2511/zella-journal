@@ -259,16 +259,19 @@ function computePnl(t) {
   return isFinite(m) ? m : 0;
 }
 function computeR(t) {
+  const pnl = computePnl(t);
+  const rUsd = num(t.riskUsd);
+  if (isFinite(rUsd) && rUsd > 0) return pnl / rUsd;   // přímé riziko v USD má přednost
   const inst = instrFor(t);
   const e = num(t.entryPrice), st = num(t.stopLoss), q = num(t.quantity);
   if (isFinite(e) && isFinite(st) && isFinite(q) && e !== st) {
     if (inst && inst.tickSize > 0) {
       const riskTicks = Math.abs(e - st) / inst.tickSize;
       const riskUSD = riskTicks * inst.tickValue * q;
-      if (riskUSD > 0) return computePnl(t) / riskUSD;
+      if (riskUSD > 0) return pnl / riskUSD;
     } else {
       const risk = Math.abs(e - st) * q;
-      if (risk > 0) return computePnl(t) / risk;
+      if (risk > 0) return pnl / risk;
     }
   }
   return null;
@@ -353,7 +356,7 @@ function fmtCompact(v, cur = "$") {
   if (a >= 1000) return `${s}${cur}${(a / 1000).toFixed(a >= 10000 ? 0 : 1)}k`;
   return `${s}${cur}${a.toFixed(0)}`;
 }
-const fmtNum = (v, d = 2) => isFinite(v) ? v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }) : "—";
+const fmtNum = (v, d = 2) => (v != null && isFinite(v)) ? v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }) : "—";
 function fmtDate(iso) {
   const d = new Date(iso);
   return isNaN(d) ? "—" : d.toLocaleString("cs-CZ", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -363,7 +366,7 @@ function pluralObchod(n) { return n === 1 ? "obchod" : n >= 2 && n <= 4 ? "obcho
 const blankTrade = () => ({
   id: uid(), date: new Date().toISOString().slice(0, 16), symbol: "", direction: "long",
   frameworkId: "", entryPrice: "", exitPrice: "", quantity: "", stopLoss: "", fees: "", pnl: "", notes: "",
-  tags: [], mistakes: [], rating: "", reviewed: false, missed: false, ruleChecks: [], mae: "", mfe: "",
+  tags: [], mistakes: [], rating: "", reviewed: false, missed: false, ruleChecks: [], mae: "", mfe: "", riskUsd: "",
   accountId: "", shots: [], source: "manual", verified: false,
 });
 function fileToThumb(file, maxDim = 1100, quality = 0.62) {
@@ -452,6 +455,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
   const [enrolled, setEnrolled] = useState(enrolledProp);
   const [mentorName, setMentorName] = useState(mentorNameProp);
   const [trusted, setTrusted] = useState(false);
+  const [mentorPlaybooks, setMentorPlaybooks] = useState([]);
   const [mentorPlans, setMentorPlans] = useState([]);
   const [mentorTrades, setMentorTrades] = useState([]);
   const [mentorTab, setMentorTab] = useState("plans");
@@ -461,9 +465,9 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
 
   /* zda mě mentor označil jako důvěryhodného (ztiší varování o ručních obchodech) */
   useEffect(() => {
-    if (!enrolled) { setTrusted(false); return; }
+    if (!enrolled) { setTrusted(false); setMentorPlaybooks([]); return; }
     let live = true;
-    fetch("/api/mentor/status").then((r) => r.json()).then((d) => { if (live) setTrusted(!!d.trusted); }).catch(() => {});
+    fetch("/api/mentor/status").then((r) => r.json()).then((d) => { if (live) { setTrusted(!!d.trusted); setMentorPlaybooks(Array.isArray(d.playbooks) ? d.playbooks : []); } }).catch(() => {});
     return () => { live = false; };
   }, [enrolled]);
 
@@ -782,6 +786,8 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
   };
 
   const fwById = useMemo(() => Object.fromEntries(frameworks.map((f) => [f.id, f])), [frameworks]);
+  const mentoringFrameworks = useMemo(() => mentorPlaybooks.map((p, i) => ({ ...p, color: p.color || FW_COLORS[i % FW_COLORS.length], rules: p.rules || [] })), [mentorPlaybooks]);
+  const mentoringFwById = useMemo(() => ({ ...fwById, ...Object.fromEntries(mentoringFrameworks.map((f) => [f.id, f])) }), [fwById, mentoringFrameworks]);
   const activeAccount = useMemo(() => accounts.find((a) => a.id === activeAcc), [accounts, activeAcc]);
   const cur = activeAccount?.currency || "$";
   const newTrade = () => ({ ...blankTrade(), accountId: activeAcc });
@@ -869,7 +875,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
           : view === "mentoring" ? (
             !enrolled ? <RedeemScreen onRedeem={redeemCode} />
             : <MentoringView
-                plans={mentorPlans} mtrades={mentorTrades} fwById={fwById} frameworks={frameworks} instruments={instrumentsList} cur={cur} mentorName={mentorName}
+                plans={mentorPlans} mtrades={mentorTrades} fwById={mentoringFwById} frameworks={mentoringFrameworks} instruments={instrumentsList} cur={cur} mentorName={mentorName}
                 tab={mentorTab} setTab={setMentorTab}
                 onSavePlan={saveMentorPlan} onNewPlan={newMentorPlan} onDeletePlan={deleteMentorPlan}
                 onImportTrades={() => setEditingMImport(true)} onDeleteTrade={deleteMentorTrade} />
@@ -2220,8 +2226,11 @@ function TradeForm({ initial, onSave, onCancel, cur, frameworks, onCreateFramewo
             <Field label="Výstupní cena"><input type="number" step="any" value={t.exitPrice} onChange={set("exitPrice")} /></Field>
             <Field label="Velikost"><input type="number" step="any" value={t.quantity} onChange={set("quantity")} /></Field>
           </div>
-          <div className="g3">
-            <Field label="Stop loss" hint="pro R"><input type="number" step="any" value={t.stopLoss} onChange={set("stopLoss")} /></Field>
+          <div className="g2">
+            <Field label="Stop loss" hint="pro R · cena stopu"><input type="number" step="any" value={t.stopLoss} onChange={set("stopLoss")} /></Field>
+            <Field label="Riziko $" hint="pro R · přímo v USD"><input type="number" step="any" value={t.riskUsd} onChange={set("riskUsd")} placeholder="kolik jsi riskoval" /></Field>
+          </div>
+          <div className="g2">
             <Field label="Poplatky"><input type="number" step="any" value={t.fees} onChange={set("fees")} /></Field>
             <Field label={`P&L ručně`} hint="bez cen"><input type="number" step="any" value={t.pnl} onChange={set("pnl")} disabled={autoP} /></Field>
           </div>
@@ -2419,7 +2428,7 @@ function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, m
                         <td><span className={`pill ${t.direction}`}>{t.direction === "long" ? "L" : "S"}</span></td>
                         <td>{f ? <><i className="fdot" style={{ background: f.color }} />{f.name}</> : "—"}</td>
                         <td className={`r ${p >= 0 ? "pos" : "neg"}`}>{fmtMoney(p, cur)}</td>
-                        <td className="r">{isFinite(r) ? `${fmtNum(r, 2)}R` : "—"}</td>
+                        <td className="r">{r === null ? "—" : `${fmtNum(r, 2)}R`}</td>
                         <td className="r nowrap">
                           <button className="ic-btn" onClick={() => onDeleteTrade(t.id)}><Trash2 size={14} /></button>
                         </td>

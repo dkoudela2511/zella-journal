@@ -18,6 +18,9 @@ export default function AdminPanel() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState("");
+  const [pb, setPb] = useState([]);
+  const [pbDirty, setPbDirty] = useState(false);
+  const [pbSaved, setPbSaved] = useState(false);
 
   const loadMentor = () => {
     fetch("/api/mentor")
@@ -55,6 +58,16 @@ export default function AdminPanel() {
   const setTrust = async (userId, trusted) => {
     await fetch("/api/mentor", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "trust", userId, trusted }) });
     loadMentor();
+  };
+  useEffect(() => { if (mentor && Array.isArray(mentor.playbooks) && !pbDirty) setPb(mentor.playbooks); }, [mentor, pbDirty]);
+  const pbId = () => Math.random().toString(36).slice(2, 9);
+  const pbAdd = () => { setPb([...pb, { id: pbId(), name: "", description: "" }]); setPbDirty(true); setPbSaved(false); };
+  const pbSet = (i, patch) => { setPb(pb.map((p, j) => (j === i ? { ...p, ...patch } : p))); setPbDirty(true); setPbSaved(false); };
+  const pbDel = (i) => { setPb(pb.filter((_, j) => j !== i)); setPbDirty(true); setPbSaved(false); };
+  const pbSave = async () => {
+    const clean = pb.filter((p) => (p.name || "").trim());
+    await fetch("/api/mentor", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "playbooks", playbooks: clean }) });
+    setPbDirty(false); setPbSaved(true); setTimeout(() => setPbSaved(false), 2000); loadMentor();
   };
   const copy = (code) => {
     try { navigator.clipboard.writeText(code); setCopied(code); setTimeout(() => setCopied(""), 1500); } catch {}
@@ -104,6 +117,26 @@ export default function AdminPanel() {
           </table>
         )}
         {codes.length === 0 && <div className="sec-empty">Zatím žádné kódy. Vygeneruj první.</div>}
+      </div>
+
+      {/* Výchozí playbooky pro studenty */}
+      <div className="admin-card pad">
+        <h3 className="sec-h">Výchozí playbooky <span className="count">{pb.length}</span></h3>
+        <p className="sec-sub">Tyhle playbooky se automaticky nabízejí všem tvým studentům v sekci <b>Mentoring</b> (v obchodním plánu). Ve svém osobním deníku si studenti dál vedou vlastní playbooky — tohle je jen pro mentorovanou část.</p>
+        <div className="pb-list">
+          {pb.map((p, i) => (
+            <div className="pb-row" key={p.id || i}>
+              <input className="pb-name" placeholder="Název (např. Reverzal)" value={p.name || ""} onChange={(e) => pbSet(i, { name: e.target.value })} />
+              <input className="pb-desc" placeholder="Krátký popis (nepovinné)" value={p.description || ""} onChange={(e) => pbSet(i, { description: e.target.value })} />
+              <button className="lnk del" onClick={() => pbDel(i)} title="Odebrat">odebrat</button>
+            </div>
+          ))}
+          {pb.length === 0 && <div className="sec-empty">Zatím žádný playbook. Přidej třeba Reverzal a Trend.</div>}
+        </div>
+        <div className="pb-actions">
+          <button className="lnk" onClick={pbAdd}>+ Přidat playbook</button>
+          <button className="btn-view" onClick={pbSave} disabled={!pbDirty}>{pbSaved ? "Uloženo ✓" : "Uložit playbooky"}</button>
+        </div>
       </div>
 
       {/* Moji studenti */}
