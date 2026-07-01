@@ -3144,4 +3144,4 @@ function Style() {
 `}</style>);
 }
 
-export { Dashboard, Style, setInstruments, computeStats, computePnl, computeR, fmtMoney, fmtNum };
+export { Dashboard, Style, setInstruments, computeStats, computePnl, computeR, fmtMoney, fmtNum, ReportsView };

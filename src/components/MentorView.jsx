@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Dashboard, Style, setInstruments, computeStats } from "./Journal";
+import { Dashboard, Style, setInstruments, computeStats, ReportsView } from "./Journal";
 
 function num(v) { return parseFloat(v); }
 function computePnl(t, instMap) {
@@ -85,7 +85,12 @@ export default function MentorView({ userId }) {
   useMemo(() => { setInstruments(data?.instruments || []); }, [data]);
   const personalTrades = useMemo(() => data?.trades || [], [data]);
   const pStats = useMemo(() => computeStats(personalTrades), [personalTrades]);
+  const personalSorted = useMemo(() => [...personalTrades].sort((a, b) => new Date(b.date) - new Date(a.date)), [personalTrades]);
   const cur = (data?.accounts || [])[0]?.currency || "$";
+  const [perSize, setPerSize] = useState(20);
+  const [perPage, setPerPage] = useState(1);
+  const [dozSize, setDozSize] = useState(20);
+  const [dozPage, setDozPage] = useState(1);
 
   const onComment = async (planId, comment) => {
     const r = await fetch("/api/admin/student", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId, planId, comment }) });
@@ -127,6 +132,7 @@ export default function MentorView({ userId }) {
         <button className={tab === "plans" ? "on" : ""} onClick={() => setTab("plans")}>Obchodní plány</button>
         <button className={tab === "trades" ? "on" : ""} onClick={() => setTab("trades")}>Dozorované obchody</button>
         <button className={tab === "personal" ? "on" : ""} onClick={() => setTab("personal")}>Osobní deník</button>
+        <button className={tab === "reports" ? "on" : ""} onClick={() => setTab("reports")}>Reports</button>
       </div>
 
       {tab === "plans" ? (
@@ -149,7 +155,7 @@ export default function MentorView({ userId }) {
                   <tr><th>Datum</th><th>Symbol</th><th>Směr</th><th>Playbook</th><th className="r">Vstup</th><th className="r">Výstup</th><th className="r">Velikost</th><th className="r">P&L</th></tr>
                 </thead>
                 <tbody>
-                  {[...personalTrades].sort((a, b) => new Date(b.date) - new Date(a.date)).map((t) => {
+                  {personalSorted.slice((perPage - 1) * perSize, perPage * perSize).map((t) => {
                     const p = computePnl(t, instMap); const f = fwById[t.frameworkId];
                     return (
                       <tr key={t.id}>
@@ -166,8 +172,15 @@ export default function MentorView({ userId }) {
                   })}
                 </tbody>
               </table>
+              <PageBar total={personalSorted.length} size={perSize} page={perPage} onSize={(v) => { setPerSize(v); setPerPage(1); }} onPage={setPerPage} />
             </div>
           </>
+        )
+      ) : tab === "reports" ? (
+        personalTrades.length === 0 ? (
+          <div className="admin-card pad"><div className="sec-empty">Student zatím nemá žádné osobní obchody pro statistiky.</div></div>
+        ) : (
+          <ReportsView trades={personalTrades} frameworks={data.frameworks || []} fwById={fwById} cur={cur} />
         )
       ) : (
         <div className="admin-card">
@@ -179,7 +192,7 @@ export default function MentorView({ userId }) {
                 <tr><th>Datum</th><th>Symbol</th><th>Směr</th><th>Playbook</th><th className="r">Vstup</th><th className="r">Výstup</th><th className="r">Velikost</th><th className="r">P&L</th></tr>
               </thead>
               <tbody>
-                {tradesSorted.map((t) => {
+                {tradesSorted.slice((dozPage - 1) * dozSize, dozPage * dozSize).map((t) => {
                   const p = computePnl(t, instMap); const f = fwById[t.frameworkId];
                   return (
                     <tr key={t.id}>
@@ -197,6 +210,7 @@ export default function MentorView({ userId }) {
               </tbody>
             </table>
           )}
+          {tradesSorted.length > 0 && <PageBar total={tradesSorted.length} size={dozSize} page={dozPage} onSize={(v) => { setDozSize(v); setDozPage(1); }} onPage={setDozPage} />}
         </div>
       )}
 
@@ -261,6 +275,45 @@ function PlanReview({ plan, fw, inst, onComment, onLight }) {
           {saved && <span className="plan-saved">Uloženo ✓</span>}
           <button className="btn-view" onClick={save} disabled={busy}>{busy ? "Ukládám…" : "Uložit komentář"}</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function pageList(page, pages) {
+  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1);
+  const s = new Set([1, 2, pages - 1, pages, page - 1, page, page + 1]);
+  const arr = [...s].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b);
+  const out = []; let prev = 0;
+  for (const n of arr) { if (n - prev > 1) out.push("…"); out.push(n); prev = n; }
+  return out;
+}
+
+function PageBar({ total, size, page, onSize, onPage }) {
+  const pages = Math.max(1, Math.ceil(total / size));
+  const cur = Math.min(page, pages);
+  const start = total === 0 ? 0 : (cur - 1) * size + 1;
+  const end = Math.min(cur * size, total);
+  return (
+    <div className="pgbar">
+      <div className="pg-info">Zobrazeno {start}–{end} z {total}</div>
+      <div className="pg-nav">
+        {pages > 1 && (
+          <>
+            <button className="pg-btn" disabled={cur <= 1} onClick={() => onPage(cur - 1)}>‹</button>
+            {pageList(cur, pages).map((n, i) =>
+              n === "…"
+                ? <span key={"e" + i} className="pg-ell">…</span>
+                : <button key={n} className={`pg-btn ${n === cur ? "on" : ""}`} onClick={() => onPage(n)}>{n}</button>
+            )}
+            <button className="pg-btn" disabled={cur >= pages} onClick={() => onPage(cur + 1)}>›</button>
+          </>
+        )}
+        <select className="pg-size" value={size} onChange={(e) => onSize(Number(e.target.value))}>
+          <option value={10}>10 / stránku</option>
+          <option value={20}>20 / stránku</option>
+          <option value={50}>50 / stránku</option>
+        </select>
       </div>
     </div>
   );

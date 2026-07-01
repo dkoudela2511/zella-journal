@@ -182,3 +182,14 @@ body {
   font-variant-numeric:tabular-nums;
 }
 .tzembed *{box-sizing:border-box;}
+
+/* stránkování tabulek v mentorském pohledu */
+.pgbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:12px 14px;border-top:1px solid #EEF0F6;}
+.pg-info{font-size:13px;color:#8A90A2;}
+.pg-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.pg-btn{min-width:30px;height:30px;padding:0 8px;border:1px solid #E5E8F0;background:#fff;border-radius:7px;font-size:13px;font-weight:600;color:#5C6275;cursor:pointer;}
+.pg-btn:hover:not(:disabled){border-color:#C2A14A;color:#16203A;}
+.pg-btn.on{background:#17386F;border-color:#17386F;color:#fff;}
+.pg-btn:disabled{opacity:.4;cursor:default;}
+.pg-ell{color:#8A90A2;padding:0 2px;}
+.pg-size{height:30px;border:1px solid #E5E8F0;background:#fff;border-radius:7px;font-size:13px;color:#5C6275;padding:0 6px;cursor:pointer;margin-left:6px;}
