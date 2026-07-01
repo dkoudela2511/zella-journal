@@ -170,3 +170,15 @@ body {
 .pb-name { flex: 0 0 230px; font-weight: 600; }
 .pb-desc { flex: 1; min-width: 0; }
 .pb-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 4px; }
+
+/* scope pro vložený app dashboard v mentorském pohledu (proměnné bez layoutu) */
+.tzembed{
+  --bg:#F4F6FA; --card:#FFFFFF; --line:#E5E8F0; --line2:#EEF0F6;
+  --text:#16203A; --muted:#8A90A2; --soft:#5C6275;
+  --accent:#17386F; --accent-soft:#E9EFF8;
+  --navy:#0E1E42; --navy-deep:#0A1733; --navy-soft:#19305A;
+  --gold:#C2A14A; --gold-bright:#D9BC63; --gold-soft:#F7EFD6;
+  --pos:#16A06A; --neg:#E0414A;
+  font-variant-numeric:tabular-nums;
+}
+.tzembed *{box-sizing:border-box;}

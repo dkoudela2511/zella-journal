@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { Dashboard, Style, setInstruments, computeStats } from "./Journal";
 
 function num(v) { return parseFloat(v); }
 function computePnl(t, instMap) {
@@ -79,6 +80,13 @@ export default function MentorView({ userId }) {
     return c;
   }, [data]);
 
+  // osobní deník studenta (kompletní dashboard z jeho vlastních obchodů)
+  const [pMode, setPMode] = useState("$");
+  useMemo(() => { setInstruments(data?.instruments || []); }, [data]);
+  const personalTrades = useMemo(() => data?.trades || [], [data]);
+  const pStats = useMemo(() => computeStats(personalTrades), [personalTrades]);
+  const cur = (data?.accounts || [])[0]?.currency || "$";
+
   const onComment = async (planId, comment) => {
     const r = await fetch("/api/admin/student", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId, planId, comment }) });
     if (r.ok) {
@@ -96,7 +104,9 @@ export default function MentorView({ userId }) {
   const tradesSorted = [...mtrades].sort((a, b) => new Date(b.date) - new Date(a.date));
 
   return (
-    <div className="admin-wrap">
+    <div className="tzembed">
+      <Style />
+      <div className="admin-wrap">
       <div className="admin-top">
         <div className="admin-brand"><Link href="/admin" className="admin-link">← Zpět na seznam</Link></div>
         <span className="ro-badge">Mentoring</span>
@@ -116,6 +126,7 @@ export default function MentorView({ userId }) {
       <div className="mtr-tabs">
         <button className={tab === "plans" ? "on" : ""} onClick={() => setTab("plans")}>Obchodní plány</button>
         <button className={tab === "trades" ? "on" : ""} onClick={() => setTab("trades")}>Dozorované obchody</button>
+        <button className={tab === "personal" ? "on" : ""} onClick={() => setTab("personal")}>Osobní deník</button>
       </div>
 
       {tab === "plans" ? (
@@ -125,6 +136,38 @@ export default function MentorView({ userId }) {
           plans.map((p) => (
             <PlanReview key={p.id} plan={p} fw={fwById[p.frameworkId]} inst={instMap[String(p.symbol || "").toUpperCase()]} onComment={onComment} onLight={setLight} />
           ))
+        )
+      ) : tab === "personal" ? (
+        personalTrades.length === 0 ? (
+          <div className="admin-card pad"><div className="sec-empty">Student zatím nemá žádné osobní obchody.</div></div>
+        ) : (
+          <>
+            <Dashboard stats={pStats} trades={personalTrades} cur={cur} fwById={fwById} mode={pMode} onMode={setPMode} trusted={true} />
+            <div className="admin-card" style={{ marginTop: 16 }}>
+              <table className="admin-tbl">
+                <thead>
+                  <tr><th>Datum</th><th>Symbol</th><th>Směr</th><th>Playbook</th><th className="r">Vstup</th><th className="r">Výstup</th><th className="r">Velikost</th><th className="r">P&L</th></tr>
+                </thead>
+                <tbody>
+                  {[...personalTrades].sort((a, b) => new Date(b.date) - new Date(a.date)).map((t) => {
+                    const p = computePnl(t, instMap); const f = fwById[t.frameworkId];
+                    return (
+                      <tr key={t.id}>
+                        <td>{dt(t.date)}</td>
+                        <td>{t.symbol || "—"}</td>
+                        <td><span className={`pill ${t.direction}`}>{t.direction === "long" ? "Long" : "Short"}</span></td>
+                        <td>{f ? <><i className="fdot" style={{ background: f.color }} />{f.name}</> : "—"}</td>
+                        <td className="r">{t.entryPrice || "—"}</td>
+                        <td className="r">{t.exitPrice || "—"}</td>
+                        <td className="r">{t.quantity || "—"}</td>
+                        <td className={`r ${p >= 0 ? "pos" : "neg"}`}>{money(p)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )
       ) : (
         <div className="admin-card">
@@ -158,6 +201,7 @@ export default function MentorView({ userId }) {
       )}
 
       {light && <div className="mv-light" onClick={() => setLight(null)}><img src={light} alt="" /></div>}
+      </div>
     </div>
   );
 }
