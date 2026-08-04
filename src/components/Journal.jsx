@@ -2439,12 +2439,18 @@ function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, m
 
   return (
     <div className="stack mentoring">
-      <div className="mtr-head">
-        <div className="mtr-when">Mentoring{mentorName && <span className="mtr-mentor">Mentor: {mentorName}</span>}</div>
-        <div className="mtr-adh">
-          <span className="adh-chip yes">Držel: {adh.yes}</span>
-          <span className="adh-chip partial">Částečně: {adh.partial}</span>
-          <span className="adh-chip no">Nedržel: {adh.no}</span>
+      <div className="men-head">
+        <div className="men-id">
+          <div className="men-ic"><GraduationCap size={20} /></div>
+          <div>
+            <div className="men-title">Mentoring</div>
+            {mentorName && <div className="men-mentor">Mentor: <b>{mentorName}</b></div>}
+          </div>
+        </div>
+        <div className="men-adh">
+          <span className="men-chip y">Držel {adh.yes}×</span>
+          <span className="men-chip p">Částečně {adh.partial}×</span>
+          <span className="men-chip n">Nedržel {adh.no}×</span>
         </div>
       </div>
 
@@ -2458,8 +2464,8 @@ function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, m
           <div className="mtr-bar"><button className="btn primary sm" onClick={onNewPlan}><Plus size={14} /> Přidat obchodní plán</button></div>
           {sortedPlans.length === 0 ? (
             <div className="card empty-card center"><p>Zatím žádný obchodní plán. Ráno před trhem si rozepiš weekly, daily a stav aukce — jakmile plán uložíš, mentor uvidí, že máš nový.</p></div>
-          ) : sortedPlans.map((p) => (
-            <PlanCard key={p.id} plan={p} frameworks={frameworks} fwById={fwById} instruments={instruments} cur={cur}
+          ) : sortedPlans.map((p, i) => (
+            <PlanCard key={p.id} plan={p} frameworks={frameworks} fwById={fwById} instruments={instruments} cur={cur} defaultOpen={i === 0}
               onSave={(patch) => onSavePlan(p.id, patch)} onDelete={() => onDeletePlan(p.id)} />
           ))}
         </>
@@ -2507,28 +2513,39 @@ function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, m
   );
 }
 
-function PlanCard({ plan, frameworks, fwById, instruments, cur, onSave, onDelete }) {
+function PlanCard({ plan, frameworks, fwById, instruments, cur, onSave, onDelete, defaultOpen }) {
   const [d, setD] = useState(plan);
+  const [open, setOpen] = useState(defaultOpen ?? false);
   const [showDebrief, setShowDebrief] = useState(!!(plan.outcome || plan.adherence || plan.lessons || (plan.debriefShots || []).length));
   useEffect(() => { setD(plan); }, [plan]);
   const dirty = JSON.stringify(d) !== JSON.stringify(plan);
   const setF = (k, v) => setD({ ...d, [k]: v });
   const setSec = (sec, patch) => setD({ ...d, [sec]: { ...(d[sec] || { note: "", shots: [] }), ...patch } });
+  const fw = fwById[d.frameworkId];
+  const instName = (instruments.find((i) => i.symbol === d.symbol) || {}).name;
+  const dateLabel = d.date ? new Date(d.date).toLocaleDateString("cs-CZ", { weekday: "short", day: "numeric", month: "numeric", year: "numeric" }) : "Nový plán";
 
   return (
-    <div className="card plan-card">
-      <div className="plan-head">
-        <div className="plan-when">
-          <span className="plan-wd">Obchodní plán</span>
-          <input type="date" className="plan-date-in" value={d.date || ""} onChange={(e) => setF("date", e.target.value)} />
-        </div>
-        <div className="plan-head-r">
-          {d.adherence && <span className={`adh-chip ${d.adherence}`}>{adhLabel(d.adherence)}</span>}
-          <button className="ic-btn" onClick={onDelete} title="Smazat plán"><Trash2 size={14} /></button>
-        </div>
+    <div className={`plan-card2 ${open ? "open" : ""}`}>
+      <div className="plan-head2" onClick={() => setOpen((o) => !o)}>
+        <span className="plan-chev">›</span>
+        <span className="plan-date2">{dateLabel}</span>
+        <span className="plan-market2"><span className="u">Trh</span> {d.symbol || "—"}{instName ? ` · ${instName}` : ""}</span>
+        <span className="plan-sp" />
+        {dirty && <span className="plan-unsaved">neuloženo</span>}
+        {plan.mentorComment && <span className="plan-hascom" title="Mentor ti napsal komentář"><GraduationCap size={13} /></span>}
+        {fw && <span className="plan-fw2"><i className="fdot" style={{ background: fw.color }} />{fw.name}</span>}
+        {d.adherence && <span className={`adh-chip ${d.adherence}`}>{adhLabel(d.adherence)}</span>}
+        <button className="ic-btn" onClick={(e) => { e.stopPropagation(); onDelete(); }} title="Smazat plán"><Trash2 size={14} /></button>
       </div>
 
+      {open && (
+      <div className="plan-body2">
       <div className="plan-basics">
+        <div>
+          <label>Datum</label>
+          <input type="date" value={d.date || ""} onChange={(e) => setF("date", e.target.value)} />
+        </div>
         <div>
           <label>Trh</label>
           <select value={d.symbol || ""} onChange={(e) => setF("symbol", e.target.value)}>
@@ -2595,6 +2612,8 @@ function PlanCard({ plan, frameworks, fwById, instruments, cur, onSave, onDelete
       <div className="plan-foot">
         {dirty ? <button className="btn primary sm" onClick={() => onSave(d)}>Uložit plán</button> : <span className="plan-saved">Uloženo ✓</span>}
       </div>
+      </div>
+      )}
     </div>
   );
 }
@@ -2967,7 +2986,34 @@ function Style() {
 .plan-foot{padding:0 16px 14px;display:flex;justify-content:flex-end;}
 .plan-saved{font-size:12.5px;color:#0F9D58;font-weight:600;}
 .plan-date-in{border:1px solid var(--line);border-radius:7px;padding:3px 8px;font-family:inherit;font-size:12px;color:var(--soft);}
-.plan-basics{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 16px;border-bottom:1px solid var(--line2);}
+.plan-basics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;padding:14px 16px;border-bottom:1px solid var(--line2);}
+
+/* ===== Klientský Mentoring – brand hlavička + roletky plánů ===== */
+.men-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;}
+.men-id{display:flex;align-items:center;gap:11px;}
+.men-ic{width:40px;height:40px;border-radius:11px;background:var(--navy);color:var(--gold-soft);display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+.men-title{font-size:16px;font-weight:700;color:var(--text);line-height:1.15;}
+.men-mentor{font-size:12px;color:var(--muted);margin-top:1px;}
+.men-mentor b{color:#8A6D1E;}
+.men-adh{display:flex;gap:8px;flex-wrap:wrap;}
+.men-chip{font-size:12px;font-weight:600;padding:5px 12px;border-radius:20px;white-space:nowrap;}
+.men-chip.y{color:#0F6E56;background:#E1F5EE;} .men-chip.p{color:#8A6D1E;background:var(--gold-soft);} .men-chip.n{color:#A32D2D;background:#FCEBEB;}
+
+.plan-card2{border:1px solid var(--line);border-radius:14px;background:var(--card);margin-bottom:10px;overflow:hidden;transition:border-color .15s;}
+.plan-card2.open{border-color:#D5DDEA;}
+.plan-head2{display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;}
+.plan-head2:hover{background:#FAFBFD;}
+.plan-chev{font-size:20px;color:#B4B9C6;transition:transform .18s;width:14px;text-align:center;display:inline-block;line-height:1;flex:0 0 auto;}
+.plan-card2.open .plan-chev{transform:rotate(90deg);color:var(--navy);}
+.plan-date2{font-weight:700;color:var(--text);font-size:14px;min-width:150px;}
+.plan-market2{font-size:13px;color:var(--soft);white-space:nowrap;}
+.plan-market2 .u{color:#A6ABB8;margin-right:5px;}
+.plan-sp{flex:1;}
+.plan-unsaved{font-size:11px;font-weight:600;color:#8A6D1E;background:var(--gold-soft);padding:3px 9px;border-radius:20px;}
+.plan-hascom{color:var(--navy);display:inline-flex;opacity:.75;}
+.plan-fw2{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text);background:var(--bg);border:1px solid var(--line);padding:4px 11px;border-radius:20px;white-space:nowrap;}
+.plan-body2{border-top:1px solid var(--line2);}
+@media(max-width:640px){ .plan-date2{min-width:0;} .plan-market2{display:none;} }
 .plan-basics label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
 .plan-basics select{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-family:inherit;font-size:13.5px;background:#fff;color:var(--text);}
 .plan-sec{padding:14px 16px;border-bottom:1px solid var(--line2);}
