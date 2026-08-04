@@ -1135,12 +1135,90 @@ function EqTip({ active, payload, cur, isR }) {
 }
 
 /* ========================= JOURNAL ========================= */
+function periodRange(preset, from, to) {
+  if (preset === "custom") return { lo: from ? new Date(from + "T00:00:00") : null, hi: to ? new Date(to + "T23:59:59.999") : null };
+  if (preset === "7d" || preset === "30d") {
+    const days = preset === "30d" ? 30 : 7;
+    const lo = new Date(); lo.setHours(0, 0, 0, 0); lo.setDate(lo.getDate() - (days - 1));
+    const hi = new Date(); hi.setHours(23, 59, 59, 999);
+    return { lo, hi };
+  }
+  return { lo: null, hi: null };
+}
+function inPeriod(dateStr, lo, hi) {
+  if (!lo && !hi) return true;
+  const d = new Date(dateStr); if (isNaN(d)) return false;
+  if (lo && d < lo) return false;
+  if (hi && d > hi) return false;
+  return true;
+}
+function pageNums(page, pages) {
+  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1);
+  const set = new Set([1, 2, pages - 1, pages, page - 1, page, page + 1]);
+  const arr = [...set].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b);
+  const out = []; let prev = 0;
+  for (const n of arr) { if (n - prev > 1) out.push("…"); out.push(n); prev = n; }
+  return out;
+}
+
+function PeriodBar({ preset, from, to, size, onPreset, onFrom, onTo, onSize, unit }) {
+  return (
+    <div className="period-bar">
+      <span className="pb-lab"><CalendarDays size={14} /> Období</span>
+      <input type="date" className="pb-date" value={from} onChange={(e) => onFrom(e.target.value)} />
+      <span className="pb-dash">—</span>
+      <input type="date" className="pb-date" value={to} onChange={(e) => onTo(e.target.value)} />
+      <div className="pb-chips">
+        <button type="button" className={preset === "7d" ? "on" : ""} onClick={() => onPreset("7d")}>7 dní</button>
+        <button type="button" className={preset === "30d" ? "on" : ""} onClick={() => onPreset("30d")}>30 dní</button>
+        <button type="button" className={preset === "all" ? "on" : ""} onClick={() => onPreset("all")}>Vše</button>
+      </div>
+      <div className="pb-sp" />
+      <select className="pb-size" value={size} onChange={(e) => onSize(Number(e.target.value))}>
+        <option value={10}>10 {unit} / stránku</option>
+        <option value={20}>20 {unit} / stránku</option>
+        <option value={50}>50 {unit} / stránku</option>
+      </select>
+    </div>
+  );
+}
+
+function Pager({ total, size, page, onPage, unit }) {
+  const pages = Math.max(1, Math.ceil(total / size));
+  const cur = Math.min(page, pages);
+  const start = total === 0 ? 0 : (cur - 1) * size + 1;
+  const end = Math.min(cur * size, total);
+  return (
+    <div className="pager">
+      <div className="pgr-info">{total === 0 ? `Žádné ${unit} pro toto období` : `Zobrazeno ${start}–${end} z ${total} ${unit}`}</div>
+      {pages > 1 && (
+        <div className="pgr-nav">
+          <button type="button" className="pgr-btn" disabled={cur <= 1} onClick={() => onPage(cur - 1)}>‹</button>
+          {pageNums(cur, pages).map((n, i) => n === "…"
+            ? <span key={"e" + i} className="pgr-ell">…</span>
+            : <button type="button" key={n} className={`pgr-btn ${n === cur ? "on" : ""}`} onClick={() => onPage(n)}>{n}</button>)}
+          <button type="button" className="pgr-btn" disabled={cur >= pages} onClick={() => onPage(cur + 1)}>›</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilter, setFwFilter, dirFilter, setDirFilter, total, onEdit, onDelete, onImport, onChart, onBulkDelete, isAdmin }) {
   const sorted = useMemo(() => [...trades].sort((a, b) => new Date(b.date) - new Date(a.date)), [trades]);
+  const [preset, setPreset] = useState("all");
+  const [from, setFrom] = useState(""); const [to, setTo] = useState("");
+  const [size, setSize] = useState(10); const [page, setPage] = useState(1);
+  const filtered = useMemo(() => { const { lo, hi } = periodRange(preset, from, to); return sorted.filter((t) => inPeriod(t.date, lo, hi)); }, [sorted, preset, from, to]);
+  const pageItems = filtered.slice((page - 1) * size, page * size);
+  const setPresetR = (p) => { setPreset(p); setFrom(""); setTo(""); setPage(1); };
+  const setFromR = (v) => { setFrom(v); setPreset("custom"); setPage(1); };
+  const setToR = (v) => { setTo(v); setPreset("custom"); setPage(1); };
+  const setSizeR = (v) => { setSize(v); setPage(1); };
   const [sel, setSel] = useState(() => new Set());
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const allOn = sorted.length > 0 && sorted.every((t) => sel.has(t.id));
-  const toggleAll = () => setSel(() => (allOn ? new Set() : new Set(sorted.map((t) => t.id))));
+  const allOn = pageItems.length > 0 && pageItems.every((t) => sel.has(t.id));
+  const toggleAll = () => setSel(() => (allOn ? new Set() : new Set(pageItems.map((t) => t.id))));
   const clearSel = () => setSel(new Set());
   const bulkDelete = () => {
     const ids = [...sel];
@@ -1163,8 +1241,10 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
         </select>
         {(query || fwFilter || dirFilter) && <button className="btn ghost" onClick={() => { setQuery(""); setFwFilter(""); setDirFilter(""); }}><X size={14} /> Zrušit</button>}
         <button className="btn ghost" onClick={onImport}><FileText size={14} /> Import CSV</button>
-        <div className="count">{sorted.length} / {total}</div>
+        <div className="count">{filtered.length} / {total}</div>
       </div>
+
+      <PeriodBar preset={preset} from={from} to={to} size={size} onPreset={setPresetR} onFrom={setFromR} onTo={setToR} onSize={setSizeR} unit="obchodů" />
 
       {sel.size > 0 && (
         <div className="bulk-bar">
@@ -1175,7 +1255,7 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
       )}
 
       <div className="card table-wrap">
-        {sorted.length === 0 ? <div className="empty small">Žádný obchod neodpovídá filtru.</div> : (
+        {filtered.length === 0 ? <div className="empty small">Žádný obchod neodpovídá filtru.</div> : (
           <table className="tbl">
             <thead><tr>
               <th className="chk"><input type="checkbox" checked={allOn} onChange={toggleAll} title="Vybrat vše" /></th>
@@ -1184,7 +1264,7 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
               <th className="r">R</th><th className="r">P&L</th><th></th>
             </tr></thead>
             <tbody>
-              {sorted.map((t) => {
+              {pageItems.map((t) => {
                 const p = computePnl(t), r = computeR(t), f = fwById[t.frameworkId];
                 const editable = t.source === "manual" || isAdmin;
                 return (
@@ -1223,6 +1303,8 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
           </table>
         )}
       </div>
+
+      <Pager total={filtered.length} size={size} page={page} onPage={setPage} unit="obchodů" />
     </div>
   );
 }
@@ -1237,13 +1319,25 @@ function DailyJournalView({ trades, fwById, cur, notes, onSaveNote, onEditTrade,
     return Object.keys(map).sort((a, b) => (a < b ? 1 : -1)).map((k) => ({ key: k, trades: map[k] }));
   }, [trades]);
 
+  const [preset, setPreset] = useState("all");
+  const [from, setFrom] = useState(""); const [to, setTo] = useState("");
+  const [size, setSize] = useState(10); const [page, setPage] = useState(1);
+  const filtered = useMemo(() => { const { lo, hi } = periodRange(preset, from, to); return days.filter((d) => inPeriod(d.key + "T12:00:00", lo, hi)); }, [days, preset, from, to]);
+  const pageItems = filtered.slice((page - 1) * size, page * size);
+  const setPresetR = (p) => { setPreset(p); setFrom(""); setTo(""); setPage(1); };
+  const setFromR = (v) => { setFrom(v); setPreset("custom"); setPage(1); };
+  const setToR = (v) => { setTo(v); setPreset("custom"); setPage(1); };
+  const setSizeR = (v) => { setSize(v); setPage(1); };
+
   return (
     <div className="stack dj">
       <p className="dj-intro">Den po dni: výsledky, obchody toho dne a tvoje poznámky (pre-market plán, recap, co se povedlo a co příště jinak).</p>
-      {days.map((d) => (
+      <PeriodBar preset={preset} from={from} to={to} size={size} onPreset={setPresetR} onFrom={setFromR} onTo={setToR} onSize={setSizeR} unit="dní" />
+      {pageItems.map((d) => (
         <DayCard key={d.key} dk={d.key} trades={d.trades} fwById={fwById} cur={cur}
           note={notes[d.key] || ""} onSaveNote={onSaveNote} onEditTrade={onEditTrade} onAdd={onAdd} isAdmin={isAdmin} />
       ))}
+      <Pager total={filtered.length} size={size} page={page} onPage={setPage} unit="dní" />
     </div>
   );
 }
@@ -2775,6 +2869,24 @@ function Style() {
 
 /* daily journal */
 .dj-intro{margin:0;font-size:14px;color:var(--soft);max-width:620px;}
+.period-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;}
+.pb-lab{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);}
+.pb-date{height:36px;border:1px solid var(--line);border-radius:9px;background:#fff;padding:0 10px;font-family:inherit;font-size:13px;color:var(--text);}
+.pb-dash{color:#A6ABB8;}
+.pb-chips{display:flex;gap:6px;}
+.pb-chips button{font-size:12px;font-weight:600;padding:7px 12px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--soft);cursor:pointer;font-family:inherit;}
+.pb-chips button:hover{border-color:var(--gold);color:var(--text);}
+.pb-chips button.on{background:var(--navy);border-color:var(--navy);color:#fff;}
+.pb-sp{flex:1;}
+.pb-size{height:36px;border:1px solid var(--line);border-radius:9px;background:#fff;padding:0 10px;font-family:inherit;font-size:13px;color:var(--soft);cursor:pointer;}
+.pager{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:4px 2px;}
+.pgr-info{font-size:13px;color:var(--muted);}
+.pgr-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.pgr-btn{min-width:32px;height:32px;padding:0 9px;border:1px solid var(--line);background:#fff;border-radius:8px;font-size:13px;font-weight:600;color:var(--soft);cursor:pointer;font-family:inherit;}
+.pgr-btn:hover:not(:disabled){border-color:var(--gold);color:var(--text);}
+.pgr-btn.on{background:var(--navy);border-color:var(--navy);color:#fff;}
+.pgr-btn:disabled{opacity:.4;cursor:default;}
+.pgr-ell{color:var(--muted);padding:0 2px;}
 .day-card{padding:18px 20px;display:flex;flex-direction:column;gap:14px;}
 .day-card2{padding:0;overflow:hidden;margin-bottom:10px;}
 .day-head2{display:flex;align-items:center;gap:13px;padding:15px 18px;cursor:pointer;}
