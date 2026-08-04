@@ -2561,40 +2561,44 @@ function PlanCard({ plan, frameworks, fwById, instruments, cur, onSave, onDelete
         </div>
       </div>
 
-      <div className="plan-group">Příprava — před vstupem</div>
-
-      {PLAN_SECTIONS.map((sec) => {
-        const v = d[sec.key] || { note: "", shots: [] };
-        return (
-          <div className="plan-sec" key={sec.key}>
-            <div className="plan-sec-h"><span className="plan-sec-n">{sec.letter}</span>{sec.label}</div>
-            <div className="plan-sec-body">
-              <textarea rows={4} value={v.note || ""} onChange={(e) => setSec(sec.key, { note: e.target.value })} placeholder={sec.ph} />
-              <ShotInput large shots={v.shots || []} onChange={(shots) => setSec(sec.key, { shots })} />
+      <div className="plan-cols">
+        <div className="plan-col">
+          <div className="plan-phead navy">Příprava — před vstupem</div>
+          <div className="plan-col-b">
+            {PLAN_SECTIONS.map((sec) => {
+              const v = d[sec.key] || { note: "", shots: [] };
+              return (
+                <div className="plan-sec" key={sec.key}>
+                  <div className="plan-sec-h"><span className="plan-sec-n">{sec.letter}</span>{sec.label}</div>
+                  <textarea rows={3} value={v.note || ""} onChange={(e) => setSec(sec.key, { note: e.target.value })} placeholder={sec.ph} />
+                  <ShotInput large shots={v.shots || []} onChange={(shots) => setSec(sec.key, { shots })} />
+                </div>
+              );
+            })}
+            <div className="plan-sec">
+              <div className="plan-sec-h"><span className="plan-sec-n">+</span>Popis plánu</div>
+              <textarea rows={2} value={d.description || ""} onChange={(e) => setF("description", e.target.value)} placeholder="Celkový záměr: co a proč chci dělat, vstup, stop, cíl…" />
             </div>
           </div>
-        );
-      })}
-
-      <div className="plan-sec">
-        <div className="plan-sec-h"><span className="plan-sec-n">+</span>Popis plánu</div>
-        <textarea rows={3} value={d.description || ""} onChange={(e) => setF("description", e.target.value)} placeholder="Celkový záměr: co a proč chci dělat, vstup, stop, cíl…" />
-      </div>
-
-      <div className="plan-group after">Po obchodu — po vstupu</div>
-      <div className="plan-after">
-        <label>Jak to dopadlo</label>
-        <textarea rows={2} value={d.outcome || ""} onChange={(e) => setF("outcome", e.target.value)} placeholder="Co se dělo, jak jsem reagoval…" />
-        <label>Držel jsem se plánu?</label>
-        <div className="adh-pick">
-          {ADH_OPTS.map((o) => (
-            <button key={o.v} type="button" className={`adh-opt ${o.v} ${d.adherence === o.v ? "on" : ""}`} onClick={() => setF("adherence", o.v)}>{o.l}</button>
-          ))}
         </div>
-        <label>Co se povedlo / co příště jinak</label>
-        <textarea rows={2} value={d.lessons || ""} onChange={(e) => setF("lessons", e.target.value)} placeholder="Plusy a poučení do příště…" />
-        <label>Screeny výsledku (vstup/výstup, jak to skončilo)</label>
-        <ShotInput large shots={d.debriefShots || []} onChange={(shots) => setF("debriefShots", shots)} />
+
+        <div className="plan-col after">
+          <div className="plan-phead gold">Po obchodu — po vstupu</div>
+          <div className="plan-col-b">
+            <label>Jak to dopadlo</label>
+            <textarea rows={2} value={d.outcome || ""} onChange={(e) => setF("outcome", e.target.value)} placeholder="Co se dělo, jak jsem reagoval…" />
+            <label>Držel jsem se plánu?</label>
+            <div className="adh-pick">
+              {ADH_OPTS.map((o) => (
+                <button key={o.v} type="button" className={`adh-opt ${o.v} ${d.adherence === o.v ? "on" : ""}`} onClick={() => setF("adherence", o.v)}>{o.l}</button>
+              ))}
+            </div>
+            <label>Co se povedlo / co příště jinak</label>
+            <textarea rows={2} value={d.lessons || ""} onChange={(e) => setF("lessons", e.target.value)} placeholder="Plusy a poučení do příště…" />
+            <label>Screeny výsledku (vstup/výstup, jak to skončilo)</label>
+            <ShotInput large shots={d.debriefShots || []} onChange={(shots) => setF("debriefShots", shots)} />
+          </div>
+        </div>
       </div>
 
       {plan.mentorComment && (
@@ -3011,23 +3015,26 @@ function Style() {
 @media(max-width:640px){ .plan-date2{min-width:0;} .plan-market2{display:none;} }
 .plan-basics label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
 .plan-basics select{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-family:inherit;font-size:13.5px;background:#fff;color:var(--text);}
-.plan-sec{padding:14px 16px;border-bottom:1px solid var(--line2);}
-.plan-sec-body{display:block;}
-.plan-sec-body textarea{min-height:70px;}
-.plan-sec-h{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;margin-bottom:9px;}
-.plan-sec-n{width:18px;height:18px;border-radius:50%;background:#F7EFD6;color:#17386F;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;}
-.plan-sec textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-family:inherit;font-size:13.5px;resize:vertical;line-height:1.5;}
-.shots.large{flex-direction:row;flex-wrap:wrap;align-items:flex-start;gap:10px;margin-top:10px;}
-.shots.large .shot{width:200px;height:116px;border:1px solid var(--line);border-radius:9px;overflow:hidden;}
+.plan-cols{display:grid;grid-template-columns:1fr 1fr;gap:0;}
+.plan-col.after{border-left:2px solid var(--line);}
+.plan-phead{font-size:12px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;padding:11px 16px;color:#fff;}
+.plan-phead.navy{background:#17386F;}
+.plan-phead.gold{background:#C2A14A;color:#3B2E08;}
+.plan-col-b{padding:14px 16px;}
+.plan-col-b > label{display:block;font-size:12px;font-weight:600;color:var(--soft);margin:12px 0 5px;}
+.plan-col-b > label:first-child{margin-top:0;}
+.plan-col-b > textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-family:inherit;font-size:13.5px;resize:vertical;line-height:1.5;min-height:52px;}
+.plan-sec{padding:0;border:none;}
+.plan-sec + .plan-sec{margin-top:14px;padding-top:14px;border-top:1px solid var(--line2);}
+.plan-sec-h{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;margin-bottom:8px;color:var(--text);}
+.plan-sec-n{width:20px;height:20px;border-radius:6px;background:#F7EFD6;color:#8A6D1E;font-size:12px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;}
+.plan-sec textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-family:inherit;font-size:13.5px;resize:vertical;line-height:1.5;min-height:52px;}
+.shots.large{flex-direction:row;flex-wrap:wrap;align-items:flex-start;gap:8px;margin-top:8px;}
+.shots.large .shot{width:150px;height:88px;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
 .shots.large .shot img{display:block;width:100%;height:100%;object-fit:cover;background:#EEF1F6;border:none;border-radius:0;max-width:none;max-height:none;cursor:zoom-in;}
-.shots.large .shot-del{top:6px;right:6px;}
-.shots.large .shot-add{width:160px;height:116px;font-size:12px;}
-.plan-group{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:#17386F;padding:14px 16px 8px;border-bottom:1px solid var(--line2);}
-.plan-group.after{color:#8A6D1E;border-top:1px solid var(--line2);}
-.plan-after{padding:12px 16px;}
-.plan-after label{display:block;font-size:12px;color:var(--muted);margin:10px 0 5px;}
-.plan-after label:first-child{margin-top:0;}
-.plan-after textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-family:inherit;font-size:13.5px;resize:vertical;line-height:1.5;}
+.shots.large .shot-del{top:5px;right:5px;}
+.shots.large .shot-add{width:120px;height:88px;font-size:11px;}
+@media(max-width:900px){ .plan-cols{grid-template-columns:1fr;} .plan-col.after{border-left:none;border-top:2px solid var(--line);} }
 .plan-debrief{padding:6px 16px 4px;}
 .debrief-toggle{display:flex;align-items:center;gap:6px;background:none;border:none;font-family:inherit;font-size:13px;font-weight:600;color:var(--soft);cursor:pointer;padding:8px 0;}
 .debrief-body{padding-bottom:8px;}
