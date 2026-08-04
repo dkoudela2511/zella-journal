@@ -11,6 +11,7 @@ import {
   RadarChart, PolarGrid, PolarAngleAxis, Radar, BarChart, Bar, Cell,
 } from "recharts";
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 
 /* ================================================================== *
  *  Zella-style trading journal  ·  Fáze: deník + frameworky + score
@@ -132,6 +133,50 @@ function groupNinjaTrades(rows) {
 function isNinjaTrades(cols) {
   const set = new Set((cols || []).map((c) => String(c).trim()));
   return set.has("Instrument") && set.has("Market pos.") && set.has("Entry price") && set.has("Exit price");
+}
+
+/* ---------- ATAS (list "Journal") ---------- */
+function atasNum(v) { if (v == null || v === "") return 0; const n = parseFloat(String(v).replace(/[^0-9.\-]/g, "")); return isFinite(n) ? n : 0; }
+function atasSymbol(instr) {
+  let s = String(instr || "").split("@")[0].trim().toUpperCase();  // "MESU6@CME" -> "MESU6"
+  s = s.replace(/[FGHJKMNQUVXZ]\d{1,2}$/, "");                     // odstranit kód kontraktu (U6, Q6, N26…)
+  return s;
+}
+function isAtasJournal(cols) {
+  const set = new Set((cols || []).map((c) => String(c).trim()));
+  return set.has("Open time") && set.has("Open price") && set.has("Open volume") && set.has("Close price") && (set.has("PnL") || set.has("Price PnL"));
+}
+function atasDate(raw) {
+  if (raw == null || raw === "") return null;
+  if (typeof raw === "object" && typeof raw.getUTCFullYear === "function") {   // Date z SheetJS (uložený čas = UTC složky) → přenést jako lokální čas
+    if (isNaN(raw)) return null;
+    return new Date(raw.getUTCFullYear(), raw.getUTCMonth(), raw.getUTCDate(), raw.getUTCHours(), raw.getUTCMinutes(), raw.getUTCSeconds());
+  }
+  const s = String(raw).trim(); if (!s) return null;
+  const d = new Date(s.replace(" ", "T"));
+  return isNaN(d) ? null : d;
+}
+function groupAtasTrades(rows) {
+  return (rows || []).map((r) => {
+    const vol = atasNum(r["Open volume"]);
+    const dir = vol < 0 ? "short" : "long";
+    const qty = Math.abs(vol) || Math.abs(atasNum(r["Close volume"]));
+    const d = atasDate(r["Open time"]);
+    return {
+      account: String(r["Account"] || "").trim(),
+      symbol: atasSymbol(r["Instrument"]),
+      direction: dir,
+      quantity: qty ? String(qty) : "",
+      entryPrice: (r["Open price"] != null && r["Open price"] !== "") ? String(r["Open price"]) : "",
+      exitPrice: (r["Close price"] != null && r["Close price"] !== "") ? String(r["Close price"]) : "",
+      date: d,
+      fees: "0",
+      mae: "",
+      mfe: "",
+      pnl: String(round(atasNum(r["PnL"]), 2)),
+      strategy: "",
+    };
+  }).filter((g) => g.symbol && (g.entryPrice || g.exitPrice));
 }
 
 const FW_COLORS = ["#17386F", "#16C784", "#F59E0B", "#EC4899", "#06B6D4", "#F0454E", "#8B5CF6", "#84CC16"];
@@ -655,7 +700,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
     return made.length;
   };
 
-  const importNinjaTrades = (rawRows) => {
+  const importNinjaTrades = (grouped) => {
     let fws = [...frameworks];
     const fwByName = {}; fws.forEach((f) => (fwByName[f.name.toLowerCase()] = f));
     const getFw = (name) => {
@@ -682,7 +727,6 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       return na.id;
     };
 
-    const grouped = groupNinjaTrades(rawRows);
     const byAcc = {};
     const made = grouped.map((g) => {
       const t = blankTrade(); t.accountId = resolveAcc(g.account);
@@ -713,7 +757,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
   };
 
   // Import do DOZOROVANÝCH obchodů (mentoring) — vždy "importováno", nelze zadat ručně
-  const buildFromNinja = (rawRows) => {
+  const buildFromNinja = (grouped) => {
     let fws = [...frameworks];
     const fwByName = {}; fws.forEach((f) => (fwByName[f.name.toLowerCase()] = f));
     const getFw = (name) => {
@@ -722,7 +766,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       if (!f) { f = { id: uid(), name: name.trim(), description: "", color: FW_COLORS[fws.length % FW_COLORS.length], rules: [] }; fws.push(f); fwByName[k] = f; }
       return f.id;
     };
-    const made = groupNinjaTrades(rawRows).map((g) => {
+    const made = grouped.map((g) => {
       const t = blankTrade(); t.accountId = activeAcc;
       t.symbol = g.symbol; t.direction = g.direction; t.quantity = g.quantity;
       t.entryPrice = g.entryPrice; t.exitPrice = g.exitPrice;
@@ -735,8 +779,8 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
     if (fws.length !== frameworks.length) persistF(fws);
     return made;
   };
-  const importNinjaToMentor = (rawRows) => {
-    const made = buildFromNinja(rawRows);
+  const importNinjaToMentor = (grouped) => {
+    const made = buildFromNinja(grouped);
     persistMentorTrades([...made, ...mentorTrades]);
     setEditingMImport(false);
     return made.length;
@@ -2021,26 +2065,41 @@ function ImportForm({ onImport, onImportNinja, onCancel }) {
   const [mapping, setMapping] = useState({});
   const [name, setName] = useState("");
   const [err, setErr] = useState("");
-  const [ninja, setNinja] = useState(false);
+  const [kind, setKind] = useState(null); // "ninja" | "atas" | "generic"
 
-  const onFile = (e) => {
+  const applyData = (fields, data) => {
+    if (!fields.length || !data.length) { setErr("V souboru se nepodařilo najít sloupce ani řádky. Má první řádek hlavičku?"); return; }
+    const at = isAtasJournal(fields), nt = isNinjaTrades(fields);
+    setKind(at ? "atas" : nt ? "ninja" : "generic");
+    setCols(fields); setRows(data);
+    if (!at && !nt) setMapping(guessMapping(fields));
+  };
+
+  const onFile = async (e) => {
     const f = e.target.files[0]; e.target.value = ""; if (!f) return;
     setName(f.name); setErr("");
+    const lower = f.name.toLowerCase();
+    if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+      try {
+        const buf = await f.arrayBuffer();
+        const wb = XLSX.read(buf, { cellDates: true });
+        const wsName = wb.SheetNames.find((n) => /journal/i.test(n)) || wb.SheetNames[0];
+        const data = XLSX.utils.sheet_to_json(wb.Sheets[wsName], { defval: "" });
+        const fields = data.length ? Object.keys(data[0]) : [];
+        applyData(fields, data);
+      } catch (er) { setErr("Soubor .xlsx se nepodařilo načíst. Zkus v ATASu list „Journal“."); }
+      return;
+    }
     Papa.parse(f, {
       header: true, skipEmptyLines: "greedy",
-      complete: (res) => {
-        const fields = (res.meta.fields || []).filter(Boolean);
-        if (!fields.length || !res.data.length) { setErr("V souboru se nepodařilo najít sloupce ani řádky. Má první řádek hlavičku?"); return; }
-        const isNT = isNinjaTrades(fields);
-        setNinja(isNT); setCols(fields); setRows(res.data);
-        if (!isNT) setMapping(guessMapping(fields));
-      },
+      complete: (res) => applyData((res.meta.fields || []).filter(Boolean), res.data),
       error: () => setErr("Soubor se nepodařilo načíst."),
     });
   };
   const setMap = (field, col) => setMapping((m) => ({ ...m, [field]: col || undefined }));
   const ready = cols && rows.length > 0;
-  const grouped = useMemo(() => (ninja ? groupNinjaTrades(rows) : []), [ninja, rows]);
+  const isGrouped = kind === "ninja" || kind === "atas";
+  const grouped = useMemo(() => (kind === "ninja" ? groupNinjaTrades(rows) : kind === "atas" ? groupAtasTrades(rows) : []), [kind, rows]);
   const acctSplit = useMemo(() => {
     const m = {};
     grouped.forEach((g) => { const a = (g.account || "").trim(); if (a) m[a] = (m[a] || 0) + 1; });
@@ -2055,19 +2114,19 @@ function ImportForm({ onImport, onImportNinja, onCancel }) {
         <div className="sheet-b">
           {!ready ? (
             <>
-              <p className="hint-line">Nahraj <b>export ze záložky Trades z NinjaTraderu</b> (pozná se sám a seskupí scale-outy do jednoho obchodu), nebo libovolné CSV z jiného nástroje. NinjaTrader obchody se rozdělí do účtů podle sloupce <i>Account</i> (chybějící účet appka založí); ostatní CSV jdou do aktivního účtu.</p>
+              <p className="hint-line">Nahraj <b>export z NinjaTraderu</b> (záložka Trades) nebo <b>z ATASu</b> (list <i>Journal</i>, soubor .xlsx) — appka formát pozná sama a seskupí obchody. Můžeš dát i libovolné jiné CSV. Obchody se rozdělí do účtů podle sloupce <i>Account</i> (chybějící účet appka založí); ostatní CSV jdou do aktivního účtu.</p>
               <label className="csv-drop">
                 <FileText size={26} />
-                <span>{err || "Vyber CSV soubor"}</span>
-                <input type="file" accept=".csv,text/csv" onChange={onFile} hidden />
+                <span>{err || "Vyber soubor (.csv nebo .xlsx)"}</span>
+                <input type="file" accept=".csv,.xlsx,.xls,text/csv" onChange={onFile} hidden />
               </label>
             </>
-          ) : ninja ? (
+          ) : isGrouped ? (
             <>
-              <div className="nt-badge">✓ Rozpoznán export z <b>NinjaTraderu</b> — sloupce se namapují automaticky.</div>
+              <div className="nt-badge">✓ Rozpoznán export z <b>{kind === "atas" ? "ATASu" : "NinjaTraderu"}</b> — sloupce se namapují automaticky.</div>
               <div className="csv-file"><FileText size={15} /> {name}
-                <span className="muted">· {rows.length} řádků → <b>{grouped.length} {pluralObchod(grouped.length)}</b> po seskupení</span>
-                <button className="btn ghost sm" onClick={() => { setCols(null); setRows([]); setNinja(false); }}>Jiný soubor</button></div>
+                <span className="muted">· {rows.length} řádků → <b>{grouped.length} {pluralObchod(grouped.length)}</b>{kind === "ninja" ? " po seskupení" : ""}</span>
+                <button className="btn ghost sm" onClick={() => { setCols(null); setRows([]); setKind(null); }}>Jiný soubor</button></div>
               {acctSplit.length > 1 && (
                 <div className="acct-split-note">
                   <b>Víc účtů v souboru</b> — obchody se rozdělí do účtů podle sloupce <i>Account</i>:
@@ -2075,7 +2134,7 @@ function ImportForm({ onImport, onImportNinja, onCancel }) {
                 </div>
               )}
               <div className="csv-prev">
-                <div className="csv-prev-h">Náhled (po seskupení podle vstupu)</div>
+                <div className="csv-prev-h">Náhled{kind === "ninja" ? " (po seskupení podle vstupu)" : ""}</div>
                 <table className="csv-table">
                   <thead><tr><th>Datum</th><th>Symbol</th><th>Směr</th><th className="r">Kontr.</th><th className="r">Vstup → Výstup</th><th className="r">P&L</th><th className="r">MAE / MFE</th></tr></thead>
                   <tbody>
@@ -2087,14 +2146,16 @@ function ImportForm({ onImport, onImportNinja, onCancel }) {
                         <td className="r">{g.quantity}</td>
                         <td className="r">{g.entryPrice} → {g.exitPrice}</td>
                         <td className="r">{g.pnl} $</td>
-                        <td className="r">{g.mae} / {g.mfe}</td>
+                        <td className="r">{g.mae || "—"} / {g.mfe || "—"}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
                 {grouped.length > 6 && <div className="csv-more">…a dalších {grouped.length - 6}</div>}
               </div>
-              <p className="hint-line" style={{ marginTop: 12 }}>P&L, risk a R se po importu počítají přes tick value instrumentů. Stop loss v exportu není, takže R u importovaných obchodů doplníš ručně, když budeš chtít.</p>
+              <p className="hint-line" style={{ marginTop: 12 }}>{kind === "atas"
+                ? "P&L bereme rovnou z ATASu, takže čísla sedí i u instrumentů, které appka nezná. Stop loss v exportu není, takže R doplníš ručně, když budeš chtít."
+                : "P&L, risk a R se po importu počítají přes tick value instrumentů. Stop loss v exportu není, takže R u importovaných obchodů doplníš ručně, když budeš chtít."}</p>
             </>
           ) : (
             <>
@@ -2134,8 +2195,8 @@ function ImportForm({ onImport, onImportNinja, onCancel }) {
         </div>
         <div className="sheet-f">
           <button className="btn ghost" onClick={onCancel}>Zrušit</button>
-          {ready && ninja && <button className="btn primary" onClick={() => onImportNinja(rows)}>Importovat {grouped.length} {pluralObchod(grouped.length)}{acctSplit.length > 1 ? ` → ${acctSplit.length} účtů` : ""}</button>}
-          {ready && !ninja && <button className="btn primary" onClick={() => onImport(rows, mapping)}>Importovat {rows.length} {pluralObchod(rows.length)}</button>}
+          {ready && isGrouped && <button className="btn primary" onClick={() => onImportNinja(grouped)}>Importovat {grouped.length} {pluralObchod(grouped.length)}{acctSplit.length > 1 ? ` → ${acctSplit.length} účtů` : ""}</button>}
+          {ready && kind === "generic" && <button className="btn primary" onClick={() => onImport(rows, mapping)}>Importovat {rows.length} {pluralObchod(rows.length)}</button>}
         </div>
       </div>
     </div>
