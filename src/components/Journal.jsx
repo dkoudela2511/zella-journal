@@ -2516,7 +2516,6 @@ function MentoringView({ plans, mtrades, fwById, frameworks, instruments, cur, m
 function PlanCard({ plan, frameworks, fwById, instruments, cur, onSave, onDelete, defaultOpen }) {
   const [d, setD] = useState(plan);
   const [open, setOpen] = useState(defaultOpen ?? false);
-  const [showDebrief, setShowDebrief] = useState(!!(plan.outcome || plan.adherence || plan.lessons || (plan.debriefShots || []).length));
   useEffect(() => { setD(plan); }, [plan]);
   const dirty = JSON.stringify(d) !== JSON.stringify(plan);
   const setF = (k, v) => setD({ ...d, [k]: v });
@@ -2562,6 +2561,8 @@ function PlanCard({ plan, frameworks, fwById, instruments, cur, onSave, onDelete
         </div>
       </div>
 
+      <div className="plan-group">Příprava — před vstupem</div>
+
       {PLAN_SECTIONS.map((sec) => {
         const v = d[sec.key] || { note: "", shots: [] };
         return (
@@ -2580,26 +2581,20 @@ function PlanCard({ plan, frameworks, fwById, instruments, cur, onSave, onDelete
         <textarea rows={3} value={d.description || ""} onChange={(e) => setF("description", e.target.value)} placeholder="Celkový záměr: co a proč chci dělat, vstup, stop, cíl…" />
       </div>
 
-      <div className="plan-debrief">
-        <button className="debrief-toggle" onClick={() => setShowDebrief((x) => !x)}>
-          {showDebrief ? <ChevronDown size={15} /> : <ChevronRight size={15} />} Po trhu (debrief &amp; disciplína)
-        </button>
-        {showDebrief && (
-          <div className="debrief-body">
-            <label>Jak to dopadlo</label>
-            <textarea rows={2} value={d.outcome || ""} onChange={(e) => setF("outcome", e.target.value)} placeholder="Co se dělo, jak jsem reagoval…" />
-            <label>Držel jsem se plánu?</label>
-            <div className="adh-pick">
-              {ADH_OPTS.map((o) => (
-                <button key={o.v} type="button" className={`adh-opt ${o.v} ${d.adherence === o.v ? "on" : ""}`} onClick={() => setF("adherence", o.v)}>{o.l}</button>
-              ))}
-            </div>
-            <label>Co se povedlo / co příště jinak</label>
-            <textarea rows={2} value={d.lessons || ""} onChange={(e) => setF("lessons", e.target.value)} placeholder="Plusy a poučení do příště…" />
-            <label>Screeny (po trhu)</label>
-            <ShotInput large shots={d.debriefShots || []} onChange={(shots) => setF("debriefShots", shots)} />
-          </div>
-        )}
+      <div className="plan-group after">Po obchodu — po vstupu</div>
+      <div className="plan-after">
+        <label>Jak to dopadlo</label>
+        <textarea rows={2} value={d.outcome || ""} onChange={(e) => setF("outcome", e.target.value)} placeholder="Co se dělo, jak jsem reagoval…" />
+        <label>Držel jsem se plánu?</label>
+        <div className="adh-pick">
+          {ADH_OPTS.map((o) => (
+            <button key={o.v} type="button" className={`adh-opt ${o.v} ${d.adherence === o.v ? "on" : ""}`} onClick={() => setF("adherence", o.v)}>{o.l}</button>
+          ))}
+        </div>
+        <label>Co se povedlo / co příště jinak</label>
+        <textarea rows={2} value={d.lessons || ""} onChange={(e) => setF("lessons", e.target.value)} placeholder="Plusy a poučení do příště…" />
+        <label>Screeny výsledku (vstup/výstup, jak to skončilo)</label>
+        <ShotInput large shots={d.debriefShots || []} onChange={(shots) => setF("debriefShots", shots)} />
       </div>
 
       {plan.mentorComment && (
@@ -3017,17 +3012,22 @@ function Style() {
 .plan-basics label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
 .plan-basics select{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-family:inherit;font-size:13.5px;background:#fff;color:var(--text);}
 .plan-sec{padding:14px 16px;border-bottom:1px solid var(--line2);}
-.plan-sec-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;}
-.plan-sec-body textarea{min-height:120px;}
-@media (max-width:760px){ .plan-sec-body{grid-template-columns:1fr;} }
+.plan-sec-body{display:block;}
+.plan-sec-body textarea{min-height:70px;}
 .plan-sec-h{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;margin-bottom:9px;}
 .plan-sec-n{width:18px;height:18px;border-radius:50%;background:#F7EFD6;color:#17386F;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;}
 .plan-sec textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-family:inherit;font-size:13.5px;resize:vertical;line-height:1.5;}
-.shots.large{flex-direction:column;align-items:flex-start;gap:10px;margin-top:10px;}
-.shots.large .shot{width:auto;max-width:100%;height:auto;border:none;border-radius:0;overflow:visible;}
-.shots.large .shot img{display:block;width:auto;height:auto;max-width:min(480px,100%);max-height:380px;object-fit:contain;background:transparent;border:1px solid var(--line);border-radius:9px;cursor:zoom-in;}
-.shots.large .shot-del{top:8px;right:8px;}
-.shots.large .shot-add{align-self:flex-start;}
+.shots.large{flex-direction:row;flex-wrap:wrap;align-items:flex-start;gap:10px;margin-top:10px;}
+.shots.large .shot{width:200px;height:116px;border:1px solid var(--line);border-radius:9px;overflow:hidden;}
+.shots.large .shot img{display:block;width:100%;height:100%;object-fit:cover;background:#EEF1F6;border:none;border-radius:0;max-width:none;max-height:none;cursor:zoom-in;}
+.shots.large .shot-del{top:6px;right:6px;}
+.shots.large .shot-add{width:160px;height:116px;font-size:12px;}
+.plan-group{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:#17386F;padding:14px 16px 8px;border-bottom:1px solid var(--line2);}
+.plan-group.after{color:#8A6D1E;border-top:1px solid var(--line2);}
+.plan-after{padding:12px 16px;}
+.plan-after label{display:block;font-size:12px;color:var(--muted);margin:10px 0 5px;}
+.plan-after label:first-child{margin-top:0;}
+.plan-after textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-family:inherit;font-size:13.5px;resize:vertical;line-height:1.5;}
 .plan-debrief{padding:6px 16px 4px;}
 .debrief-toggle{display:flex;align-items:center;gap:6px;background:none;border:none;font-family:inherit;font-size:13px;font-weight:600;color:var(--soft);cursor:pointer;padding:8px 0;}
 .debrief-body{padding-bottom:8px;}
