@@ -1266,6 +1266,7 @@ const DAY_TEMPLATE =
 
 function DayCard({ dk, trades, fwById, cur, note, onSaveNote, onEditTrade, onAdd, isAdmin }) {
   const [draft, setDraft] = useState(note);
+  const [open, setOpen] = useState(dk === new Date().toISOString().slice(0, 10));
   useEffect(() => { setDraft(note); }, [note]);
 
   const s = computeStats(trades);
@@ -1277,15 +1278,20 @@ function DayCard({ dk, trades, fwById, cur, note, onSaveNote, onEditTrade, onAdd
   const ordered = [...trades].sort((a, b) => new Date(a.date) - new Date(b.date));
 
   return (
-    <div className="card day-card">
-      <div className="day-head">
+    <div className={`card day-card2 ${open ? "open" : ""}`}>
+      <div className="day-head2" onClick={() => setOpen((o) => !o)}>
+        <span className="day-chev">›</span>
         <div className="day-when">
           <span className="day-wd">{weekday}{isToday && <span className="today-badge">dnes</span>}</span>
           <span className="day-date">{dateStr}</span>
         </div>
+        {!empty && <span className="day-count">{s.n} {pluralObchod(s.n)} · {fmtNum(s.winRate, 0)} % WR</span>}
+        <span className="day-sp" />
         {!empty && <div className={`day-pnl ${s.net >= 0 ? "pos" : "neg"}`}>{fmtMoney(s.net, cur)}</div>}
       </div>
 
+      {open && (
+      <div className="day-body2">
       {!empty ? (
         <>
           <div className="day-stats">
@@ -1324,6 +1330,8 @@ function DayCard({ dk, trades, fwById, cur, note, onSaveNote, onEditTrade, onAdd
         <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => onSaveNote(dk, draft)}
           placeholder="Pre-market plán, jak šel den, co se povedlo, co příště jinak…" rows={empty ? 4 : 3} />
       </div>
+      </div>
+      )}
     </div>
   );
 }
@@ -2768,6 +2776,15 @@ function Style() {
 /* daily journal */
 .dj-intro{margin:0;font-size:14px;color:var(--soft);max-width:620px;}
 .day-card{padding:18px 20px;display:flex;flex-direction:column;gap:14px;}
+.day-card2{padding:0;overflow:hidden;margin-bottom:10px;}
+.day-head2{display:flex;align-items:center;gap:13px;padding:15px 18px;cursor:pointer;}
+.day-head2:hover{background:#FAFBFD;}
+.day-chev{font-size:20px;color:#B4B9C6;transition:transform .18s;width:14px;text-align:center;display:inline-block;line-height:1;flex:0 0 auto;}
+.day-card2.open .day-chev{transform:rotate(90deg);color:var(--navy);}
+.day-card2 .day-when{flex-direction:row;align-items:baseline;gap:10px;}
+.day-count{font-size:13px;color:var(--soft);white-space:nowrap;}
+.day-sp{flex:1;}
+.day-body2{padding:0 20px 18px;display:flex;flex-direction:column;gap:14px;border-top:1px solid var(--line2);padding-top:14px;}
 .day-head{display:flex;align-items:flex-start;justify-content:space-between;}
 .day-when{display:flex;flex-direction:column;gap:2px;}
 .day-wd{font-size:15px;font-weight:700;text-transform:capitalize;display:flex;align-items:center;gap:8px;}
