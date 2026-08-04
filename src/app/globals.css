@@ -193,3 +193,42 @@ body {
 .pg-btn:disabled{opacity:.4;cursor:default;}
 .pg-ell{color:#8A90A2;padding:0 2px;}
 .pg-size{height:30px;border:1px solid #E5E8F0;background:#fff;border-radius:7px;font-size:13px;color:#5C6275;padding:0 6px;cursor:pointer;margin-left:6px;}
+
+/* ===== Mentorský pohled – hezčí grafika (brand) ===== */
+.mv2-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
+.mv2-back{font-size:13px;color:#5C6275;text-decoration:none;border:1px solid #E5E8F0;background:#fff;padding:7px 13px;border-radius:9px;font-weight:600;transition:.15s;}
+.mv2-back:hover{border-color:#C2A14A;color:#16203A;}
+.mv2-badge{font-size:12px;font-weight:700;color:#8A6D1E;background:#F7EFD6;border:1px solid #E8D9A8;padding:5px 13px;border-radius:20px;}
+
+.mv2-id{display:flex;align-items:center;gap:14px;margin-bottom:22px;}
+.mv2-avatar{width:52px;height:52px;border-radius:14px;background:#17386F;color:#F7EFD6;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;letter-spacing:.5px;flex:0 0 auto;}
+.mv2-name{font-size:24px;font-weight:800;color:#16203A;line-height:1.1;}
+.mv2-mail{font-size:13px;color:#8A90A2;margin-top:3px;}
+
+.mv2-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px;}
+.mv2-kpi{background:#fff;border:1px solid #E9ECF3;border-radius:14px;padding:14px 16px 14px 18px;position:relative;overflow:hidden;}
+.mv2-kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#17386F;}
+.mv2-kpi .k{display:block;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#8A90A2;margin-bottom:6px;}
+.mv2-kpi b{font-size:22px;font-weight:800;color:#16203A;}
+.mv2-kpi b.pos{color:#16A06A;} .mv2-kpi b.neg{color:#E0414A;}
+
+.mv2-tabs{display:flex;gap:2px;border-bottom:1px solid #E5E8F0;margin-bottom:20px;flex-wrap:wrap;}
+.mv2-tabs button{background:none;border:none;padding:11px 16px;font-size:14px;font-weight:600;color:#8A90A2;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.15s;}
+.mv2-tabs button:hover{color:#16203A;}
+.mv2-tabs button.on{color:#17386F;border-bottom-color:#C2A14A;}
+
+/* roletky plánů */
+.pr2{border:1px solid #E9ECF3;border-radius:14px;background:#fff;margin-bottom:10px;overflow:hidden;transition:border-color .15s;}
+.pr2.open{border-color:#D5DDEA;}
+.pr2-head{width:100%;display:flex;align-items:center;gap:13px;padding:15px 18px;background:none;border:none;cursor:pointer;text-align:left;font-family:inherit;}
+.pr2-head:hover{background:#FAFBFD;}
+.pr2-chev{font-size:22px;color:#B4B9C6;transition:transform .18s;line-height:1;display:inline-block;width:14px;text-align:center;}
+.pr2.open .pr2-chev{transform:rotate(90deg);color:#17386F;}
+.pr2-date{font-weight:700;color:#16203A;font-size:14px;min-width:158px;}
+.pr2-market{font-size:13px;color:#5C6275;white-space:nowrap;}
+.pr2-market .mut{color:#A6ABB8;margin-right:5px;}
+.pr2-sp{flex:1;}
+.pr2-fw{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#16203A;background:#F4F6FA;border:1px solid #E5E8F0;padding:4px 11px;border-radius:20px;white-space:nowrap;}
+.pr2-hascom{font-size:13px;opacity:.7;}
+.pr2-body{padding:2px 18px 16px;border-top:1px solid #EEF0F6;}
+@media(max-width:640px){ .pr2-date{min-width:0;} .pr2-market{display:none;} }

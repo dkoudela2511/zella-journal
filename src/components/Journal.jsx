@@ -2383,7 +2383,7 @@ function EmptyState({ onAdd, onImport }) {
       <p>Po prvním obchodu uvidíš Zella Score, win rate, profit factor, equity křivku a kalendář. Tady se začíná hledat tvůj edge.</p>
       <div className="empty-btns">
         <button className="btn primary" onClick={onAdd}><Plus size={16} /> Zapsat první obchod</button>
-        <button className="btn ghost" onClick={onImport}><FileText size={16} /> Import z NinjaTraderu / CSV</button>
+        <button className="btn ghost" onClick={onImport}><FileText size={16} /> Import ze souboru</button>
       </div>
     </div></div>
   );

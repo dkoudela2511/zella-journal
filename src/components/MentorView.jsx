@@ -36,6 +36,13 @@ const SECTIONS = [
   { key: "auction", label: "Stav aukce" },
 ];
 
+function initials(name) {
+  const s = String(name || "").trim();
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return s.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() || "?";
+}
+
 export default function MentorView({ userId }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -112,23 +119,28 @@ export default function MentorView({ userId }) {
     <div className="tzembed">
       <Style />
       <div className="admin-wrap">
-      <div className="admin-top">
-        <div className="admin-brand"><Link href="/admin" className="admin-link">← Zpět na seznam</Link></div>
-        <span className="ro-badge">Mentoring</span>
+      <div className="mv2-top">
+        <Link href="/admin" className="mv2-back">← Zpět na seznam</Link>
+        <span className="mv2-badge">Mentoring</span>
       </div>
 
-      <h2 className="mv-title">{name}</h2>
-      <div className="mv-mail">{data.user?.email}</div>
-
-      <div className="mv-kpis">
-        <div className="mv-kpi"><span>Plánů</span><b>{plans.length}</b></div>
-        <div className="mv-kpi"><span>Dozor. obchodů</span><b>{stats.n}</b></div>
-        <div className="mv-kpi"><span>Net P&L</span><b className={stats.net >= 0 ? "pos" : "neg"}>{stats.n ? money(stats.net) : "—"}</b></div>
-        <div className="mv-kpi"><span>Držel plán</span><b className="pos">{adh.yes}×</b></div>
-        <div className="mv-kpi"><span>Nedržel</span><b className="neg">{adh.no}×</b></div>
+      <div className="mv2-id">
+        <div className="mv2-avatar">{initials(name)}</div>
+        <div>
+          <div className="mv2-name">{name}</div>
+          <div className="mv2-mail">{data.user?.email}</div>
+        </div>
       </div>
 
-      <div className="mtr-tabs">
+      <div className="mv2-kpis">
+        <div className="mv2-kpi"><span className="k">Plánů</span><b>{plans.length}</b></div>
+        <div className="mv2-kpi"><span className="k">Dozor. obchodů</span><b>{stats.n}</b></div>
+        <div className="mv2-kpi"><span className="k">Net P&L</span><b className={stats.n ? (stats.net >= 0 ? "pos" : "neg") : ""}>{stats.n ? money(stats.net) : "—"}</b></div>
+        <div className="mv2-kpi"><span className="k">Držel plán</span><b className="pos">{adh.yes}×</b></div>
+        <div className="mv2-kpi"><span className="k">Nedržel</span><b className="neg">{adh.no}×</b></div>
+      </div>
+
+      <div className="mv2-tabs">
         <button className={tab === "plans" ? "on" : ""} onClick={() => setTab("plans")}>Obchodní plány</button>
         <button className={tab === "trades" ? "on" : ""} onClick={() => setTab("trades")}>Dozorované obchody</button>
         <button className={tab === "personal" ? "on" : ""} onClick={() => setTab("personal")}>Osobní deník</button>
@@ -221,6 +233,7 @@ export default function MentorView({ userId }) {
 }
 
 function PlanReview({ plan, fw, inst, onComment, onLight }) {
+  const [open, setOpen] = useState(false);
   const [c, setC] = useState(plan.mentorComment || "");
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -233,49 +246,53 @@ function PlanReview({ plan, fw, inst, onComment, onLight }) {
   };
 
   return (
-    <div className="admin-card pad pr-card">
-      <div className="pr-head">
-        <span className="pr-date">{plan.date ? dayLabel(plan.date) : "—"}</span>
+    <div className={`pr2 ${open ? "open" : ""}`}>
+      <button className="pr2-head" onClick={() => setOpen((o) => !o)}>
+        <span className="pr2-chev">›</span>
+        <span className="pr2-date">{plan.date ? dayLabel(plan.date) : "—"}</span>
+        <span className="pr2-market"><span className="mut">Trh</span> {plan.symbol || "—"}{inst?.name ? ` · ${inst.name}` : ""}</span>
+        <span className="pr2-sp" />
+        {fw && <span className="pr2-fw"><i className="fdot" style={{ background: fw.color }} />{fw.name}</span>}
         {plan.adherence && <span className={`adh-chip ${plan.adherence}`}>{adhLabel(plan.adherence)}</span>}
-      </div>
+        {plan.mentorComment && <span className="pr2-hascom" title="Máš u tohoto plánu komentář">💬</span>}
+      </button>
 
-      <div className="pr-basics">
-        <span className="pr-tag">Trh: <b>{plan.symbol || "—"}{inst?.name ? ` · ${inst.name}` : ""}</b></span>
-        <span className="pr-tag">Framework: <b>{fw ? <><i className="fdot" style={{ background: fw.color }} />{fw.name}</> : "—"}</b></span>
-      </div>
+      {open && (
+        <div className="pr2-body">
+          {SECTIONS.map((sec) => {
+            const v = plan[sec.key] || {};
+            const shots = v.shots || [];
+            if (!v.note && shots.length === 0) return null;
+            return (
+              <div className="pr-sec" key={sec.key}>
+                <h4>{sec.label}</h4>
+                {v.note && <p>{v.note}</p>}
+                {shots.length > 0 && <div className="pr-shots big">{shots.map((s, i) => <img key={i} src={s} alt="" onClick={() => onLight(s)} />)}</div>}
+              </div>
+            );
+          })}
 
-      {SECTIONS.map((sec) => {
-        const v = plan[sec.key] || {};
-        const shots = v.shots || [];
-        if (!v.note && shots.length === 0) return null;
-        return (
-          <div className="pr-sec" key={sec.key}>
-            <h4>{sec.label}</h4>
-            {v.note && <p>{v.note}</p>}
-            {shots.length > 0 && <div className="pr-shots big">{shots.map((s, i) => <img key={i} src={s} alt="" onClick={() => onLight(s)} />)}</div>}
+          {plan.description && <div className="pr-sec"><h4>Popis plánu</h4><p>{plan.description}</p></div>}
+
+          {(plan.outcome || plan.lessons || (plan.debriefShots || []).length > 0) && (
+            <div className="pr-sec pr-debrief">
+              <h4>Po trhu</h4>
+              {plan.outcome && <p><b>Jak dopadlo:</b> {plan.outcome}</p>}
+              {plan.lessons && <p><b>Poučení:</b> {plan.lessons}</p>}
+              {(plan.debriefShots || []).length > 0 && <div className="pr-shots big">{plan.debriefShots.map((s, i) => <img key={i} src={s} alt="" onClick={() => onLight(s)} />)}</div>}
+            </div>
+          )}
+
+          <div className="pr-comment">
+            <label>Komentář mentora (student ho uvidí)</label>
+            <textarea rows={2} value={c} onChange={(e) => setC(e.target.value)} placeholder="Tvoje zpětná vazba k tomuto plánu…" />
+            <div className="pr-comment-foot">
+              {saved && <span className="plan-saved">Uloženo ✓</span>}
+              <button className="btn-view" onClick={save} disabled={busy}>{busy ? "Ukládám…" : "Uložit komentář"}</button>
+            </div>
           </div>
-        );
-      })}
-
-      {plan.description && <div className="pr-sec"><h4>Popis plánu</h4><p>{plan.description}</p></div>}
-
-      {(plan.outcome || plan.lessons || (plan.debriefShots || []).length > 0) && (
-        <div className="pr-sec pr-debrief">
-          <h4>Po trhu</h4>
-          {plan.outcome && <p><b>Jak dopadlo:</b> {plan.outcome}</p>}
-          {plan.lessons && <p><b>Poučení:</b> {plan.lessons}</p>}
-          {(plan.debriefShots || []).length > 0 && <div className="pr-shots big">{plan.debriefShots.map((s, i) => <img key={i} src={s} alt="" onClick={() => onLight(s)} />)}</div>}
         </div>
       )}
-
-      <div className="pr-comment">
-        <label>Komentář mentora (student ho uvidí)</label>
-        <textarea rows={2} value={c} onChange={(e) => setC(e.target.value)} placeholder="Tvoje zpětná vazba k tomuto plánu…" />
-        <div className="pr-comment-foot">
-          {saved && <span className="plan-saved">Uloženo ✓</span>}
-          <button className="btn-view" onClick={save} disabled={busy}>{busy ? "Ukládám…" : "Uložit komentář"}</button>
-        </div>
-      </div>
     </div>
   );
 }
