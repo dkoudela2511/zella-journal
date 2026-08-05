@@ -1982,10 +1982,12 @@ function CalendarView({ trades, cur, notes = {}, onDay }) {
         </div>
       </div>
 
-      <div className="cal2-grid">
+      <div className="cal2-dows">
         {["Po", "Út", "St", "Čt", "Pá", "So", "Ne"].map((d) => <div key={d} className="cal2-dow">{d}</div>)}
         <div className="cal2-dow wk">Týden</div>
+      </div>
 
+      <div className="cal2-body">
         {weeks.map((w, wi) => {
           const wPnl = w.reduce((a, d) => a + (d && byDay[cellKey(ref, d)] ? (mode === "R" ? byDay[cellKey(ref, d)].r : byDay[cellKey(ref, d)].pnl) : 0), 0);
           const wDays = w.filter((d) => d && byDay[cellKey(ref, d)] && byDay[cellKey(ref, d)].n > 0).length;
@@ -2848,10 +2850,11 @@ function Style() {
 .cal2-tgl{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-left:6px;}
 .cal2-tgl button{font-size:12px;font-weight:700;padding:6px 11px;color:var(--soft);cursor:pointer;background:#fff;border:none;font-family:inherit;}
 .cal2-tgl button.on{background:var(--navy);color:#fff;}
-.cal2-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr)) minmax(64px,84px);gap:5px;}
+.cal2-dows{display:grid;grid-template-columns:repeat(7,minmax(0,1fr)) minmax(64px,84px);gap:5px;margin-bottom:5px;}
+.cal2-body{display:grid;grid-template-columns:repeat(7,minmax(0,1fr)) minmax(64px,84px);gap:5px;grid-auto-rows:82px;}
 .cal2-dow{font-size:11px;font-weight:600;color:#A6ABB8;text-align:center;padding:2px 0;}
 .cal2-dow.wk{color:#8A6D1E;}
-.cal2-cell{min-height:74px;border:1px solid var(--line2);border-radius:9px;padding:6px 7px;position:relative;background:#fff;display:flex;flex-direction:column;}
+.cal2-cell{height:100%;border:1px solid var(--line2);border-radius:9px;padding:6px 7px;position:relative;background:#fff;display:flex;flex-direction:column;}
 .cal2-cell.empty{background:#FAFBFC;border-color:transparent;}
 .cal2-cell.we{background:#FAFBFC;}
 .cal2-cell.clk{cursor:pointer;}
@@ -2865,17 +2868,17 @@ function Style() {
 .cal2-pnl{font-size:14px;font-weight:800;margin-top:auto;}
 .cal2-pnl.pos{color:#0F6E56;}.cal2-pnl.neg{color:#A32D2D;}
 .cal2-n{font-size:10px;color:var(--muted);}
-.cal2-week{min-height:74px;background:#F7F5EE;border:1px solid #ECE4CE;border-radius:9px;padding:7px;display:flex;flex-direction:column;justify-content:center;}
+.cal2-week{height:100%;background:#F7F5EE;border:1px solid #ECE4CE;border-radius:9px;padding:7px;display:flex;flex-direction:column;justify-content:center;}
 .cal2-wl{font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#8A6D1E;}
 .cal2-wp{font-size:14px;font-weight:800;margin-top:3px;}
 .cal2-wp.pos{color:#0F6E56;}.cal2-wp.neg{color:#A32D2D;}.cal2-wp.zero{color:#C4C9D4;}
 .cal2-wd{font-size:9.5px;color:#B09A5E;margin-top:1px;}
 .dash-cal .cal2{padding:14px 16px;}
-.dash-cal .cal2-cell,.dash-cal .cal2-week{min-height:54px;}
+.dash-cal .cal2-body{grid-auto-rows:54px;}
 .dash-cal .cal2-pnl,.dash-cal .cal2-wp{font-size:11.5px;}
 .dash-cal .cal2-n,.dash-cal .cal2-wd{font-size:8.5px;}
 .dash-cal .cal2-title{font-size:14px;min-width:92px;}
-@media(max-width:560px){ .cal2-grid{grid-template-columns:repeat(7,minmax(0,1fr)) minmax(52px,64px);gap:3px;} .cal2-cell,.cal2-week{min-height:58px;} .cal2-pnl,.cal2-wp{font-size:12px;} }
+@media(max-width:560px){ .cal2-dows,.cal2-body{grid-template-columns:repeat(7,minmax(0,1fr)) minmax(52px,64px);gap:3px;} .cal2-body{grid-auto-rows:58px;} .cal2-pnl,.cal2-wp{font-size:12px;} }
 .score-card{grid-area:score;}
 .kpis{grid-area:kpis;display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:14px;}
 .equity-card{grid-area:equity;padding-bottom:14px;}
