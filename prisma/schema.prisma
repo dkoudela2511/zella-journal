@@ -53,3 +53,19 @@ model Store {
   @@unique([userId, key])
   @@index([userId])
 }
+
+// OHLC minutové bary (posílá centrálně admin / NinjaScript). Sdílená market data pro všechny.
+model Bar {
+  id     BigInt   @id @default(autoincrement())
+  symbol String   // plný kontrakt, např. "6A 09-26"
+  root   String   // kořen symbolu, např. "6A"
+  time   DateTime // čas baru
+  open   Float
+  high   Float
+  low    Float
+  close  Float
+  volume Int      @default(0)
+
+  @@unique([symbol, time])
+  @@index([root, time])
+}
