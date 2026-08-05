@@ -92,43 +92,58 @@ function parseNinjaDate(s) {
 }
 const round = (n, d) => { const f = Math.pow(10, d); return Math.round(n * f) / f; };
 
-// Seskupí řádky se stejným vstupem do jednoho obchodu (volba B)
+// Klíč jednoho obchodu: primárně "Entry name" z Ninji (stejné jméno = jeden vstupní
+// příkaz, i když se plnil postupně). Jméno obsahuje jen čas HHMMSS, proto + datum.
+// Fallback pro ruční vstupy s prázdným "Entry name": čas + cena vstupu (původní chování).
+function ninjaEntryKey(r) {
+  const name = String(r["Entry name"] || "").trim();
+  const day = String(r["Entry time"] || "").trim().slice(0, 10); // "30.07.2026"
+  if (name) return "N|" + day + "|" + name;
+  return "T|" + String(r["Entry time"] || "").trim() + "|" + ntNum(r["Entry price"]);
+}
+
+// Seskupí řádky jednoho obchodu do jednoho záznamu
 function groupNinjaTrades(rows) {
   const groups = {};
   (rows || []).forEach((r) => {
     const instr = r["Instrument"]; if (!instr) return;
     const root = ntRoot(instr);
     const dir = /short/i.test(r["Market pos."] || "") ? "short" : "long";
-    const entry = ntNum(r["Entry price"]);
-    const entryTime = String(r["Entry time"] || "");
     const account = String(r["Account"] || "").trim();
-    const key = [account, root, dir, entryTime, entry].join("|");
-    if (!groups[key]) groups[key] = { account, root, dir, entry, entryTime, exitTime: String(r["Exit time"] || ""), qty: 0, exitSum: 0, profit: 0, fees: 0, mae: 0, mfe: 0, strategy: String(r["Strategy"] || "").trim() };
+    const key = [account, root, dir, ninjaEntryKey(r)].join("|");
+    if (!groups[key]) groups[key] = { account, root, dir, entryTime: String(r["Entry time"] || ""), exitTime: String(r["Exit time"] || ""), qty: 0, entrySum: 0, exitSum: 0, profit: 0, fees: 0, mae: 0, mfe: 0, strategy: String(r["Strategy"] || "").trim() };
     const g = groups[key];
     const qty = ntNum(r["Qty"]);
     g.qty += qty;
+    g.entrySum += ntNum(r["Entry price"]) * qty;
     g.exitSum += ntNum(r["Exit price"]) * qty;
     g.profit += ntNum(r["Profit"]);
     NT_FEE_COLS.forEach((c) => { if (r[c] != null) g.fees += ntNum(r[c]); });
     g.mae += ntNum(r["MAE"]);
     g.mfe += ntNum(r["MFE"]);
+    // datum obchodu = nejstarší vstup, konec = nejpozdější výstup
+    const nt = parseNinjaDate(r["Entry time"]); const gn = parseNinjaDate(g.entryTime);
+    if (nt && gn && nt < gn) g.entryTime = String(r["Entry time"]);
     const et = parseNinjaDate(r["Exit time"]); const ge = parseNinjaDate(g.exitTime);
     if (et && ge && et > ge) g.exitTime = String(r["Exit time"]);
   });
-  return Object.values(groups).map((g) => ({
-    account: g.account,
-    symbol: g.root,
-    direction: g.dir,
-    quantity: g.qty ? String(g.qty) : "",
-    entryPrice: g.entry ? String(g.entry) : "",
-    exitPrice: g.qty ? String(round(g.exitSum / g.qty, 8)) : "",
-    date: parseNinjaDate(g.entryTime),
-    fees: String(round(g.fees, 2)),
-    mae: String(round(g.mae, 2)),
-    mfe: String(round(g.mfe, 2)),
-    pnl: String(round(g.profit, 2)),
-    strategy: g.strategy,
-  }));
+  return Object.values(groups).map((g) => {
+    const entry = g.qty ? round(g.entrySum / g.qty, 8) : 0;
+    return {
+      account: g.account,
+      symbol: g.root,
+      direction: g.dir,
+      quantity: g.qty ? String(g.qty) : "",
+      entryPrice: entry ? String(entry) : "",
+      exitPrice: g.qty ? String(round(g.exitSum / g.qty, 8)) : "",
+      date: parseNinjaDate(g.entryTime),
+      fees: String(round(g.fees, 2)),
+      mae: String(round(g.mae, 2)),
+      mfe: String(round(g.mfe, 2)),
+      pnl: String(round(g.profit, 2)),
+      strategy: g.strategy,
+    };
+  });
 }
 function isNinjaTrades(cols) {
   const set = new Set((cols || []).map((c) => String(c).trim()));
