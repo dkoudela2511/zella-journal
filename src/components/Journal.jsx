@@ -276,11 +276,26 @@ const p2 = (n) => String(n).padStart(2, "0");
 const barClock = (ms) => { const d = new Date(ms); return p2(d.getUTCHours()) + ":" + p2(d.getUTCMinutes()); };
 const barDay = (ms) => { const d = new Date(ms); return p2(d.getUTCDate()) + "." + p2(d.getUTCMonth() + 1) + "."; };
 
+const TFS = [1, 3, 5, 10, 15, 30, 60, 120, 240];
+const tfLabel = (m) => (m < 60 ? m + "m" : m / 60 + "h");
+
+// složení minutových barů do vyššího timeframu
+function aggBars(bars, tf) {
+  if (tf <= 1) return bars;
+  const step = tf * 60000, out = [];
+  let cur = null;
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i], t = Math.floor(b.t / step) * step;
+    if (!cur || cur.t !== t) { cur = { t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }; out.push(cur); }
+    else { if (b.h > cur.h) cur.h = b.h; if (b.l < cur.l) cur.l = b.l; cur.c = b.c; cur.v += b.v; }
+  }
+  return out;
+}
+
 function priceDecimals(bars) {
   let dec = 0;
   for (let i = 0; i < Math.min(bars.length, 120); i++) {
-    const s = String(bars[i].c);
-    const k = s.indexOf(".");
+    const s = String(bars[i].c), k = s.indexOf(".");
     if (k >= 0) dec = Math.max(dec, s.length - k - 1);
   }
   return Math.min(Math.max(dec, 1), 6);
@@ -313,12 +328,15 @@ function ChartModal({ trade, onClose }) {
   const wrapRef = useRef(null);
   const cvRef = useRef(null);
   const tvRef = useRef(null);
+  const dragRef = useRef(null);
   const [src, setSrc] = useState("own");          // "own" | "tv"
   const [bars, setBars] = useState([]);
+  const [tf, setTf] = useState(1);
+  const [view, setView] = useState(null);         // { a, b } = rozsah indexů (desetinný)
   const [contract, setContract] = useState("");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const [size, setSize] = useState({ w: 900, h: 420 });
+  const [size, setSize] = useState({ w: 1200, h: 640 });
   const [hover, setHover] = useState(null);
 
   const entryMs = wallToMs(trade && trade.date);
@@ -327,6 +345,36 @@ function ChartModal({ trade, onClose }) {
   const exitP = parseFloat(trade && trade.exitPrice);
   const isShort = (trade && trade.direction) === "short";
 
+  const agg = useMemo(() => aggBars(bars, tf), [bars, tf]);
+
+  // index (desetinný) odpovídající času
+  const idxAt = useCallback((ms) => {
+    const n = agg.length;
+    if (!n) return 0;
+    if (ms <= agg[0].t) return 0;
+    if (ms >= agg[n - 1].t) return n - 1;
+    let lo = 0, hi = n - 1;
+    while (lo < hi - 1) { const m = (lo + hi) >> 1; if (agg[m].t <= ms) lo = m; else hi = m; }
+    const span = agg[hi].t - agg[lo].t || 1;
+    return lo + (ms - agg[lo].t) / span;
+  }, [agg]);
+
+  // výchozí výřez = obchod + rezerva
+  const fitToTrade = useCallback(() => {
+    const n = agg.length;
+    if (!n) { setView(null); return; }
+    let a = 0, b = n - 1;
+    if (entryMs) {
+      const i1 = idxAt(entryMs), i2 = exitMs ? idxAt(exitMs) : i1;
+      const span = Math.max(i2 - i1, 6);
+      a = i1 - span * 0.7; b = i2 + span * 0.7;
+      if (b - a < 30) { const c = (a + b) / 2; a = c - 15; b = c + 15; }
+    }
+    setView({ a: Math.max(0, a), b: Math.min(n - 1, b) });
+  }, [agg, entryMs, exitMs, idxAt]);
+
+  useEffect(() => { fitToTrade(); }, [fitToTrade]);
+
   // načtení barů
   useEffect(() => {
     let dead = false;
@@ -334,7 +382,7 @@ function ChartModal({ trade, onClose }) {
     if (!root || !entryMs) { setLoading(false); setErr("Obchod nemá symbol nebo datum."); return; }
     const end = exitMs && exitMs > entryMs ? exitMs : entryMs + 60 * 60000;
     const span = end - entryMs;
-    const pad = Math.max(45 * 60000, Math.round(span * 0.6));
+    const pad = Math.max(6 * 3600000, span);
     const from = new Date(entryMs - pad).toISOString();
     const to = new Date(end + pad).toISOString();
     setLoading(true); setErr("");
@@ -348,7 +396,7 @@ function ChartModal({ trade, onClose }) {
         const list = picked.bars
           .map((b) => ({ t: Date.parse(b.time), o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume || 0 }))
           .filter((b) => isFinite(b.t))
-          .sort((a, b) => a.t - b.t);
+          .sort((x, y) => x.t - y.t);
         setContract(picked.symbol);
         setBars(list);
         setLoading(false);
@@ -360,16 +408,42 @@ function ChartModal({ trade, onClose }) {
   // rozměry plátna
   useEffect(() => {
     const el = wrapRef.current; if (!el) return;
-    const upd = () => setSize({ w: el.clientWidth || 900, h: el.clientHeight || 420 });
+    const upd = () => setSize({ w: el.clientWidth || 1200, h: el.clientHeight || 640 });
     upd();
     if (typeof ResizeObserver === "undefined") { window.addEventListener("resize", upd); return () => window.removeEventListener("resize", upd); }
     const ro = new ResizeObserver(upd); ro.observe(el);
     return () => ro.disconnect();
   }, [src]);
 
+  // zoom kolečkem (nepasivní listener, ať nescrolluje stránka)
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || src !== "own") return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      setView((v) => {
+        const n = agg.length; if (!v || !n) return v;
+        const ML = 12, MR = 76;
+        const pw = Math.max(20, (el.clientWidth || 1200) - ML - MR);
+        const rel = Math.min(1, Math.max(0, ((e.clientX - el.getBoundingClientRect().left) - ML) / pw));
+        const anchor = v.a + (v.b - v.a) * rel;
+        const k = e.deltaY > 0 ? 1.18 : 0.85;
+        let width = (v.b - v.a) * k;
+        width = Math.max(8, Math.min(n - 1, width));
+        let a = anchor - width * rel, b = a + width;
+        if (a < 0) { a = 0; b = width; }
+        if (b > n - 1) { b = n - 1; a = b - width; }
+        return { a: Math.max(0, a), b };
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [agg, src]);
+
   // kreslení
   useEffect(() => {
-    const cv = cvRef.current; if (!cv || src !== "own" || !bars.length) return;
+    const cv = cvRef.current;
+    if (!cv || src !== "own" || !agg.length || !view) return;
     const dpr = window.devicePixelRatio || 1;
     const W = size.w, H = size.h;
     cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
@@ -380,110 +454,125 @@ function ChartModal({ trade, onClose }) {
 
     const NAVY = "#17386F", GOLD = "#C2A14A", GREEN = "#16A06A", RED = "#E0414A";
     const LINE = "#E6EAF2", MUT = "#8A97AE", TXT = "#16203A";
-    const ML = 10, MR = 74, MT = 12, MB = 26;
+    const ML = 12, MR = 76, MT = 14, MB = 28;
     const pw = Math.max(20, W - ML - MR), ph = Math.max(20, H - MT - MB);
-    const dec = priceDecimals(bars);
+    const dec = priceDecimals(agg);
+
+    const a = view.a, b = view.b, span = Math.max(1e-6, b - a);
+    const i0 = Math.max(0, Math.floor(a) - 1), i1 = Math.min(agg.length - 1, Math.ceil(b) + 1);
+    const slot = pw / (span + 1);
+    const xOf = (i) => ML + (i - a + 0.5) * slot;
 
     let lo = Infinity, hi = -Infinity;
-    bars.forEach((b) => { if (b.l < lo) lo = b.l; if (b.h > hi) hi = b.h; });
-    if (isFinite(entryP)) { lo = Math.min(lo, entryP); hi = Math.max(hi, entryP); }
-    if (isFinite(exitP)) { lo = Math.min(lo, exitP); hi = Math.max(hi, exitP); }
+    for (let i = i0; i <= i1; i++) { const bb = agg[i]; if (bb.l < lo) lo = bb.l; if (bb.h > hi) hi = bb.h; }
+    if (!isFinite(lo)) { lo = 0; hi = 1; }
+    const inView = (ms) => { const k = idxAt(ms); return k >= a - 1 && k <= b + 1; };
+    if (isFinite(entryP) && entryMs && inView(entryMs)) { lo = Math.min(lo, entryP); hi = Math.max(hi, entryP); }
+    if (isFinite(exitP) && exitMs && inView(exitMs)) { lo = Math.min(lo, exitP); hi = Math.max(hi, exitP); }
     const padP = (hi - lo) * 0.08 || (hi * 0.001 || 1);
     lo -= padP; hi += padP;
-
-    const n = bars.length;
-    const slot = pw / n;
-    const xOf = (i) => ML + slot * (i + 0.5);
     const yOf = (p) => MT + (hi - p) / (hi - lo) * ph;
-    const xAt = (ms) => {
-      if (ms <= bars[0].t) return ML;
-      if (ms >= bars[n - 1].t) return ML + pw;
-      let k = 0; while (k < n - 1 && bars[k + 1].t <= ms) k++;
-      const span = bars[k + 1].t - bars[k].t || 1;
-      return xOf(k) + (ms - bars[k].t) / span * slot;
-    };
+    const xAt = (ms) => xOf(idxAt(ms));
 
-    // zóna držení
-    if (isFinite(entryMs) && exitMs && exitMs > entryMs) {
+    // pás doby držení
+    if (entryMs && exitMs && exitMs > entryMs) {
       const x1 = xAt(entryMs), x2 = xAt(exitMs);
-      g.fillStyle = "rgba(22,160,106,.07)";
+      g.fillStyle = isShort ? "rgba(224,65,74,.07)" : "rgba(22,160,106,.07)";
       g.fillRect(x1, MT, Math.max(1, x2 - x1), ph);
+      g.save(); g.setLineDash([4, 4]); g.strokeStyle = "rgba(23,56,111,.35)"; g.lineWidth = 1;
+      [x1, x2].forEach((x) => { g.beginPath(); g.moveTo(Math.round(x) + .5, MT); g.lineTo(Math.round(x) + .5, MT + ph); g.stroke(); });
+      g.restore();
     }
 
     // mřížka + cenová osa
-    g.font = "11px system-ui, sans-serif"; g.textBaseline = "middle";
-    for (let i = 0; i <= 4; i++) {
-      const p = lo + (hi - lo) * i / 4, y = yOf(p);
+    g.font = "11.5px system-ui, sans-serif"; g.textBaseline = "middle";
+    for (let i = 0; i <= 5; i++) {
+      const p = lo + (hi - lo) * i / 5, y = yOf(p);
       g.strokeStyle = LINE; g.lineWidth = 1;
       g.beginPath(); g.moveTo(ML, Math.round(y) + .5); g.lineTo(ML + pw, Math.round(y) + .5); g.stroke();
       g.fillStyle = MUT; g.textAlign = "left";
-      g.fillText(p.toFixed(dec), ML + pw + 7, y);
+      g.fillText(p.toFixed(dec), ML + pw + 8, y);
     }
 
     // svíčky
-    const bw = Math.max(1, Math.min(14, slot * 0.7));
-    bars.forEach((b, i) => {
-      const x = xOf(i), up = b.c >= b.o, col = up ? GREEN : RED;
+    const bw = Math.max(1, Math.min(18, slot * 0.72));
+    for (let i = i0; i <= i1; i++) {
+      const bb = agg[i], x = xOf(i);
+      if (x < ML - slot || x > ML + pw + slot) continue;
+      const up = bb.c >= bb.o, col = up ? GREEN : RED;
       g.strokeStyle = col; g.lineWidth = 1;
-      g.beginPath(); g.moveTo(Math.round(x) + .5, yOf(b.h)); g.lineTo(Math.round(x) + .5, yOf(b.l)); g.stroke();
-      const yTop = yOf(Math.max(b.o, b.c)), hgt = Math.max(1, Math.abs(yOf(b.o) - yOf(b.c)));
-      g.fillStyle = col; g.fillRect(x - bw / 2, yTop, bw, hgt);
-    });
+      g.beginPath(); g.moveTo(Math.round(x) + .5, yOf(bb.h)); g.lineTo(Math.round(x) + .5, yOf(bb.l)); g.stroke();
+      const yTop = yOf(Math.max(bb.o, bb.c)), hgt = Math.max(1, Math.abs(yOf(bb.o) - yOf(bb.c)));
+      if (bw <= 1.5) { g.strokeStyle = col; g.beginPath(); g.moveTo(Math.round(x) + .5, yTop); g.lineTo(Math.round(x) + .5, yTop + hgt); g.stroke(); }
+      else { g.fillStyle = col; g.fillRect(x - bw / 2, yTop, bw, hgt); }
+    }
 
-    // vstup / výstup
-    const level = (p, col, label, dash) => {
+    // cenové úrovně vstup / výstup
+    const level = (p, col, label) => {
       if (!isFinite(p)) return;
       const y = yOf(p);
-      g.save(); g.setLineDash(dash); g.strokeStyle = col; g.lineWidth = 1.4;
+      if (y < MT - 2 || y > MT + ph + 2) return;
+      g.save(); g.setLineDash([4, 4]); g.strokeStyle = col; g.lineWidth = 1.4;
       g.beginPath(); g.moveTo(ML, y); g.lineTo(ML + pw, y); g.stroke(); g.restore();
       const txt = label + " " + p.toFixed(dec);
-      g.font = "10.5px system-ui, sans-serif";
-      const tw = g.measureText(txt).width + 10;
-      g.fillStyle = col; g.fillRect(ML + pw + 2, y - 8, Math.min(tw, MR - 4), 16);
-      g.fillStyle = "#fff"; g.textAlign = "left"; g.fillText(txt, ML + pw + 7, y);
+      g.font = "11px system-ui, sans-serif";
+      const tw = Math.min(g.measureText(txt).width + 12, MR - 4);
+      g.fillStyle = col; g.fillRect(ML + pw + 2, y - 9, tw, 18);
+      g.fillStyle = "#fff"; g.textAlign = "left"; g.fillText(txt, ML + pw + 8, y);
     };
-    level(entryP, NAVY, "V", [3, 3]);
-    level(exitP, GOLD, "X", [3, 3]);
+    level(entryP, NAVY, "V");
+    level(exitP, GOLD, "X");
 
-    const marker = (ms, p, col, up) => {
+    // šipky vstupu a výstupu
+    const marker = (ms, p, col, up, tag) => {
       if (!ms || !isFinite(p)) return;
       const x = xAt(ms), y = yOf(p);
+      if (x < ML - 12 || x > ML + pw + 12) return;
       g.fillStyle = col; g.beginPath();
-      if (up) { g.moveTo(x, y + 7); g.lineTo(x - 6, y + 17); g.lineTo(x + 6, y + 17); }
-      else { g.moveTo(x, y - 7); g.lineTo(x - 6, y - 17); g.lineTo(x + 6, y - 17); }
+      if (up) { g.moveTo(x, y + 8); g.lineTo(x - 7, y + 20); g.lineTo(x + 7, y + 20); }
+      else { g.moveTo(x, y - 8); g.lineTo(x - 7, y - 20); g.lineTo(x + 7, y - 20); }
       g.closePath(); g.fill();
+      g.font = "10px system-ui, sans-serif"; g.textAlign = "center";
+      g.fillStyle = col;
+      g.fillText(tag, x, up ? y + 29 : y - 27);
     };
-    marker(entryMs, entryP, isShort ? RED : GREEN, !isShort);
-    if (exitMs) marker(exitMs, exitP, GOLD, isShort);
+    // vstup: barva podle směru (zelená long / červená short), šipka směřuje k ceně
+    marker(entryMs, entryP, isShort ? RED : GREEN, !isShort, isShort ? "SHORT" : "LONG");
+    // výstup: zlatá, opačná orientace
+    marker(exitMs, exitP, GOLD, isShort, "EXIT");
 
     // časová osa
     g.strokeStyle = LINE; g.beginPath(); g.moveTo(ML, MT + ph + .5); g.lineTo(ML + pw, MT + ph + .5); g.stroke();
-    g.fillStyle = MUT; g.textAlign = "center"; g.font = "11px system-ui, sans-serif";
-    const ticks = Math.max(2, Math.min(7, Math.floor(pw / 110)));
+    g.fillStyle = MUT; g.textAlign = "center"; g.font = "11.5px system-ui, sans-serif";
+    const ticks = Math.max(2, Math.min(9, Math.floor(pw / 130)));
+    let lastDay = "";
     for (let i = 0; i <= ticks; i++) {
-      const idx = Math.min(n - 1, Math.round((n - 1) * i / ticks));
-      g.fillText(barClock(bars[idx].t), xOf(idx), MT + ph + 14);
+      const idx = Math.round(a + span * i / ticks);
+      if (idx < 0 || idx >= agg.length) continue;
+      const t = agg[idx].t, day = barDay(t);
+      g.fillText(day !== lastDay ? day + " " + barClock(t) : barClock(t), xOf(idx), MT + ph + 15);
+      lastDay = day;
     }
 
-    // křížový kurzor
-    if (hover && hover.x > ML && hover.x < ML + pw) {
-      const idx = Math.max(0, Math.min(n - 1, Math.round((hover.x - ML) / slot - 0.5)));
-      const b = bars[idx];
+    // křížový kurzor + OHLC
+    if (hover && hover.x > ML && hover.x < ML + pw && hover.y > MT && hover.y < MT + ph) {
+      const idx = Math.max(0, Math.min(agg.length - 1, Math.round(a + (hover.x - ML) / slot - 0.5)));
+      const bb = agg[idx], cx = xOf(idx);
       g.save(); g.setLineDash([2, 3]); g.strokeStyle = MUT; g.lineWidth = 1;
-      g.beginPath(); g.moveTo(xOf(idx), MT); g.lineTo(xOf(idx), MT + ph); g.stroke();
+      g.beginPath(); g.moveTo(cx, MT); g.lineTo(cx, MT + ph); g.stroke();
       g.beginPath(); g.moveTo(ML, hover.y); g.lineTo(ML + pw, hover.y); g.stroke(); g.restore();
       const pr = hi - (hover.y - MT) / ph * (hi - lo);
-      g.fillStyle = TXT; g.fillRect(ML + pw + 2, hover.y - 8, MR - 6, 16);
-      g.fillStyle = "#fff"; g.font = "10.5px system-ui, sans-serif"; g.textAlign = "left";
-      g.fillText(pr.toFixed(dec), ML + pw + 7, hover.y);
-      const info = `${barDay(b.t)} ${barClock(b.t)}  O ${b.o.toFixed(dec)}  H ${b.h.toFixed(dec)}  L ${b.l.toFixed(dec)}  C ${b.c.toFixed(dec)}`;
-      g.font = "11px system-ui, sans-serif";
-      const iw = g.measureText(info).width + 14;
-      g.fillStyle = "rgba(255,255,255,.94)"; g.fillRect(ML + 4, MT + 4, iw, 20);
-      g.strokeStyle = LINE; g.strokeRect(ML + 4.5, MT + 4.5, iw, 20);
-      g.fillStyle = TXT; g.fillText(info, ML + 11, MT + 14);
+      g.fillStyle = TXT; g.fillRect(ML + pw + 2, hover.y - 9, MR - 6, 18);
+      g.fillStyle = "#fff"; g.font = "11px system-ui, sans-serif"; g.textAlign = "left";
+      g.fillText(pr.toFixed(dec), ML + pw + 8, hover.y);
+      const info = `${barDay(bb.t)} ${barClock(bb.t)}   O ${bb.o.toFixed(dec)}   H ${bb.h.toFixed(dec)}   L ${bb.l.toFixed(dec)}   C ${bb.c.toFixed(dec)}   Vol ${bb.v}`;
+      g.font = "11.5px system-ui, sans-serif";
+      const iw = g.measureText(info).width + 16;
+      g.fillStyle = "rgba(255,255,255,.94)"; g.fillRect(ML + 4, MT + 4, iw, 22);
+      g.strokeStyle = LINE; g.strokeRect(ML + 4.5, MT + 4.5, iw, 22);
+      g.fillStyle = TXT; g.fillText(info, ML + 12, MT + 15);
     }
-  }, [bars, size, src, hover, entryMs, exitMs, entryP, exitP, isShort]);
+  }, [agg, view, size, src, hover, entryMs, exitMs, entryP, exitP, isShort, idxAt]);
 
   // TradingView jako záloha
   useEffect(() => {
@@ -506,10 +595,35 @@ function ChartModal({ trade, onClose }) {
     return () => { if (host) host.innerHTML = ""; };
   }, [src, symbol]);
 
+  const onDown = (e) => {
+    if (!view) return;
+    const el = wrapRef.current; if (!el) return;
+    const ML = 12, MR = 76;
+    const pw = Math.max(20, (el.clientWidth || 1200) - ML - MR);
+    dragRef.current = { x: e.clientX, a: view.a, b: view.b, slot: pw / (view.b - view.a + 1) };
+  };
+  const onMove = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const d = dragRef.current;
+    if (d) {
+      const shift = (e.clientX - d.x) / d.slot;
+      const n = agg.length, width = d.b - d.a;
+      let a = d.a - shift, b = a + width;
+      if (a < 0) { a = 0; b = width; }
+      if (b > n - 1) { b = n - 1; a = b - width; }
+      setView({ a: Math.max(0, a), b });
+      setHover(null);
+    } else {
+      setHover({ x: e.clientX - r.left, y: e.clientY - r.top });
+    }
+  };
+  const endDrag = () => { dragRef.current = null; };
+
   const dayTxt = trade && trade.date ? `${(trade.date || "").slice(8, 10)}. ${(trade.date || "").slice(5, 7)}. ${(trade.date || "").slice(0, 4)}` : "";
+  const visible = view ? Math.round(view.b - view.a) + 1 : 0;
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className="overlay overlay-center" onClick={onClose}>
       <div className="sheet chart-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-h">
           <h3>
@@ -524,27 +638,34 @@ function ChartModal({ trade, onClose }) {
             <button className={src === "own" ? "on" : ""} onClick={() => setSrc("own")}>Moje data</button>
             <button className={src === "tv" ? "on" : ""} onClick={() => setSrc("tv")}>TradingView</button>
           </div>
+
           {src === "own" && (
-            <div className="chart-meta">
-              {contract && <span>{contract}</span>}
-              {!!bars.length && <span>{bars.length} min. barů</span>}
-              {trade && trade.exitDate && <span>{barClock(entryMs)} → {barClock(exitMs)}</span>}
-            </div>
+            <>
+              <div className="chart-tf">
+                {TFS.map((m) => (
+                  <button key={m} className={tf === m ? "on" : ""} onClick={() => setTf(m)}>{tfLabel(m)}</button>
+                ))}
+              </div>
+              <button className="btn ghost sm" onClick={fitToTrade}>Na obchod</button>
+              <div className="chart-meta">
+                {contract && <span>{contract}</span>}
+                {!!agg.length && <span>{visible} / {agg.length} barů</span>}
+                {entryMs && exitMs && <span>{barClock(entryMs)} → {barClock(exitMs)}</span>}
+              </div>
+            </>
           )}
         </div>
 
         <div className="chart-body">
           {src === "own" ? (
-            <div className="rechart-wrap" ref={wrapRef}
-              onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHover({ x: e.clientX - r.left, y: e.clientY - r.top }); }}
-              onMouseLeave={() => setHover(null)}>
+            <div className={`rechart-wrap${dragRef.current ? " grabbing" : ""}`} ref={wrapRef}
+              onMouseDown={onDown} onMouseMove={onMove} onMouseUp={endDrag}
+              onMouseLeave={() => { endDrag(); setHover(null); }}>
               <canvas ref={cvRef} />
-              {(loading || err || !bars.length) && (
+              {(loading || err || !agg.length) && (
                 <div className="rechart-msg">
                   {loading ? "Načítám bary…" : (err || "Žádné bary pro tento obchod.")}
-                  {!loading && (
-                    <button className="btn ghost sm" onClick={() => setSrc("tv")}>Otevřít v TradingView</button>
-                  )}
+                  {!loading && <button className="btn ghost sm" onClick={() => setSrc("tv")}>Otevřít v TradingView</button>}
                 </div>
               )}
             </div>
@@ -555,7 +676,7 @@ function ChartModal({ trade, onClose }) {
 
         <div className="chart-note">
           {src === "own"
-            ? "Svíčky z vlastních minutových barů z NinjaTraderu. Navy čára = vstup, zlatá = výstup, zelený pás = doba držení."
+            ? "Kolečko = zoom · tažení myší = posun · „Na obchod“ vrátí výřez zpět. Navy čára = vstup, zlatá = výstup, barevný pás = doba držení. Vyšší timeframy se skládají z minutových barů."
             : "Data dodává TradingView (zdarma). Symbol i timeframe lze změnit vlevo nahoře."}
         </div>
       </div>
@@ -3607,6 +3728,13 @@ function Style() {
 .sm-seg .seg-btn{padding:5px 11px;font-size:12px;}
 
 /* chart modal */
+.overlay-center{justify-content:center;align-items:center;padding:2vh 1.5vw;}
+.overlay-center .sheet.chart-sheet{width:min(1720px,97vw);max-width:97vw;height:96vh;border-left:0;border-radius:16px;overflow:hidden;animation:none;}
+.chart-tf{display:flex;gap:3px;flex-wrap:wrap;}
+.chart-tf button{font-size:11.5px;font-weight:600;padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer;min-width:34px;}
+.chart-tf button:hover{border-color:var(--accent);color:var(--accent);}
+.chart-tf button.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+.rechart-wrap.grabbing{cursor:grabbing;}
 .chart-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 16px 4px;flex-wrap:wrap;}
 .chart-src{display:flex;gap:4px;}
 .chart-src button{font-size:12px;font-weight:600;padding:5px 11px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer;}
@@ -3621,7 +3749,7 @@ function Style() {
 .rechart-msg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-size:13px;color:var(--muted);background:var(--card);text-align:center;padding:20px;}
 
 .sheet-h-act{display:flex;align-items:center;gap:10px;}
-.chart-sheet{width:min(1040px,96vw);max-width:96vw;height:min(80vh,720px);display:flex;flex-direction:column;}
+.chart-sheet{display:flex;flex-direction:column;}
 .chart-body{flex:1;min-height:0;padding:0 14px;}
 .chart-body .tradingview-widget-container{border:1px solid var(--line);border-radius:12px;overflow:hidden;}
 .chart-note{padding:10px 16px 14px;font-size:11.5px;color:var(--muted);line-height:1.5;}
