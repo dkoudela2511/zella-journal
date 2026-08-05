@@ -1847,14 +1847,21 @@ function DayCard({ dk, trades, fwById, cur, note, onSaveNote, onEditTrade, onAdd
             {ordered.map((t) => {
               const p = computePnl(t), r = computeR(t), f = fwById[t.frameworkId];
               return (
-                <div className={`dt-row ${t.source === "manual" || isAdmin ? "" : "row-locked"}`} key={t.id} onClick={() => { if (t.source === "manual" || isAdmin) onEditTrade(t); }}>
+                <div className="dt-row" key={t.id}>
                   <span className={`pill ${t.direction}`}>{t.direction === "long" ? "L" : "S"}</span>
                   <span className="dt-time">{new Date(t.date).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}</span>
                   <span className="dt-sym">{t.symbol || "—"}</span>
                   <span className="dt-fw">{f ? <><i className="fdot" style={{ background: f.color }} />{f.name}</> : ""}</span>
                   <span className={`dt-r ${r === null ? "mut" : r >= 0 ? "pos" : "neg"}`}>{r === null ? "" : `${r >= 0 ? "+" : ""}${fmtNum(r, 1)}R`}</span>
                   <span className={`dt-pnl ${p >= 0 ? "pos" : "neg"}`}>{fmtMoney(p, cur)}</span>
-                  <button className="dt-chart" title="Graf" onClick={(e) => { e.stopPropagation(); onChart && onChart(t); }}><BarChart3 size={14} /></button>
+                  <div className="dt-act">
+                    <button className="dt-graf" onClick={(e) => { e.stopPropagation(); onChart && onChart(t); }}>
+                      <BarChart3 size={14} /><span>Otevřít graf</span>
+                    </button>
+                    {(t.source === "manual" || isAdmin) && (
+                      <button className="dt-edit" title="Upravit obchod" onClick={(e) => { e.stopPropagation(); onEditTrade(t); }}><Pencil size={13} /></button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -3289,8 +3296,6 @@ function Style() {
 .dash-cal .cal-head{margin-bottom:10px;}
 .dash-cal .cal-dow{font-size:10px;}
 
-.dt-chart{margin-left:10px;width:26px;height:26px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--soft);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;}
-.dt-chart:hover{border-color:var(--gold);color:var(--navy);}
 .day-card2.focused{box-shadow:0 0 0 2px var(--gold-soft);}
 
 /* ===== Kompaktní P&L kalendář (cal2) ===== */
@@ -3437,8 +3442,14 @@ function Style() {
 .day-stats b{font-size:15px;font-weight:700;display:flex;align-items:baseline;gap:6px;}
 .day-stats .wl{font-size:11px;font-weight:500;color:var(--muted);font-style:normal;}
 .day-trades{display:flex;flex-direction:column;gap:2px;}
-.dt-row{display:grid;grid-template-columns:24px 48px 1fr 1.4fr 64px 92px;align-items:center;gap:10px;padding:9px 8px;border-radius:9px;cursor:pointer;font-size:13.5px;}
+.dt-row{display:grid;grid-template-columns:24px 48px 1fr 1.4fr 64px 92px 152px;align-items:center;gap:10px;padding:9px 8px;border-radius:9px;font-size:13.5px;}
 .dt-row:hover{background:var(--bg);}
+.dt-act{display:flex;align-items:center;justify-content:flex-end;gap:6px;opacity:0;transition:opacity .12s;}
+.dt-row:hover .dt-act,.dt-row:focus-within .dt-act{opacity:1;}
+.dt-graf{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;font-family:inherit;padding:6px 11px;border-radius:7px;border:1px solid var(--navy);background:var(--navy);color:#fff;cursor:pointer;white-space:nowrap;}
+.dt-graf:hover{background:#1d4483;border-color:#1d4483;}
+.dt-edit{width:28px;height:28px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--soft);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;}
+.dt-edit:hover{border-color:var(--gold);color:var(--navy);}
 .dt-time{color:var(--muted);font-size:12px;}
 .dt-sym{font-weight:700;}
 .dt-fw{color:var(--soft);font-size:12.5px;display:flex;align-items:center;gap:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -3733,8 +3744,6 @@ function Style() {
 .tbl tr.row-sel{background:#F3F6FC;}
 .tbl tr.row-locked{cursor:default;}
 .tbl tr.row-locked:hover{background:transparent;}
-.dt-row.row-locked{cursor:default;}
-.dt-row.row-locked:hover{background:transparent;}
 .act .locked-btn{opacity:.4;cursor:not-allowed;}
 .src-badge{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:5px;margin-left:6px;vertical-align:middle;}
 .src-badge.imp{background:#EAF4EF;color:#0F8A5A;}
@@ -3927,6 +3936,7 @@ function Style() {
   .lsplit{grid-template-columns:1fr;}
   .map-grid{grid-template-columns:1fr;}
   .dt-row{grid-template-columns:22px 1fr 70px 84px;}
+  .dt-act{opacity:1;grid-column:1/-1;justify-content:flex-start;margin-top:4px;}
   .dt-time,.dt-fw{display:none;}
   .g3,.g2{grid-template-columns:1fr;}
   .tbl thead{display:none;}.tbl,.tbl tbody,.tbl tr,.tbl td{display:block;width:100%;}
