@@ -919,6 +919,8 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
   const [editingAccounts, setEditingAccounts] = useState(false);
   const [editingImport, setEditingImport] = useState(false);
   const [chartFor, setChartFor] = useState(null);
+  const [focusDay, setFocusDay] = useState("");
+  const openDay = (key) => { setFocusDay(key); setView("dailyjournal"); };
   const [dashMode, setDashMode] = useState("$");
   const [dailyNotes, setDailyNotes] = useState({});
   const [notebook, setNotebook] = useState({ folders: [], notes: [] });
@@ -1329,9 +1331,9 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
 
         {!loaded ? <div className="empty">Načítám…</div>
           : trades.length === 0 && view !== "frameworks" && view !== "dailyjournal" && view !== "notebook" && view !== "progress" && view !== "mentoring" ? <EmptyState onAdd={() => setEditing(newTrade())} onImport={() => setEditingImport(true)} />
-          : view === "dashboard" ? <Dashboard stats={stats} trades={realTrades} cur={cur} fwById={fwById} onAdd={() => setEditing(newTrade())} mode={dashMode} onMode={changeDashMode} trusted={trusted} />
+          : view === "dashboard" ? <Dashboard stats={stats} trades={realTrades} cur={cur} fwById={fwById} onAdd={() => setEditing(newTrade())} mode={dashMode} onMode={changeDashMode} trusted={trusted} notes={dailyNotes} onDay={openDay} />
           : view === "dailyjournal" ? (
-            <DailyJournalView trades={realTrades} fwById={fwById} cur={cur} notes={dailyNotes} onSaveNote={saveNote} onEditTrade={(t) => setEditing({ ...t })} onAdd={() => setEditing(newTrade())} isAdmin={isAdmin} />
+            <DailyJournalView trades={realTrades} fwById={fwById} cur={cur} notes={dailyNotes} onSaveNote={saveNote} onEditTrade={(t) => setEditing({ ...t })} onAdd={() => setEditing(newTrade())} onChart={(t) => setChartFor(t)} focusDay={focusDay} isAdmin={isAdmin} />
           )
           : view === "journal" ? (
             <JournalView
@@ -1350,7 +1352,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
               onEditNote={(n) => setEditingNote({ ...n })} onDeleteNote={deleteNbNote}
               onNewFolder={() => setEditingFolder(blankFolder())} onEditFolder={(f) => setEditingFolder({ ...f })} />
           )
-          : view === "calendar" ? <CalendarView trades={realTrades} cur={cur} notes={dailyNotes} onDay={() => setView("dailyjournal")} />
+          : view === "calendar" ? <CalendarView trades={realTrades} cur={cur} notes={dailyNotes} onDay={openDay} />
           : view === "reports" ? <ReportsView trades={realTrades} frameworks={frameworks} fwById={fwById} cur={cur} />
           : view === "frameworks" ? <FrameworksView frameworks={frameworks} trades={accountTrades} cur={cur}
               onNew={() => setEditingFw(blankFw())} onEdit={(f) => setEditingFw({ ...f })} onDelete={deleteFramework} />
@@ -1404,7 +1406,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
 }
 
 /* ========================= DASHBOARD ========================= */
-function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode, trusted }) {
+function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode, trusted, notes = {}, onDay }) {
   const score = overallScore(stats);
   const axes = scoreAxes(stats);
   const { curve } = useMemo(() => equityAndDD(trades), [trades]);
@@ -1517,7 +1519,7 @@ function Dashboard({ stats, trades, cur, fwById, onAdd, mode, onMode, trusted })
         </ResponsiveContainer>
       </div>
 
-      <div className="dash-cal"><CalendarView trades={trades} cur={cur} /></div>
+      <div className="dash-cal"><CalendarView trades={trades} cur={cur} notes={notes} onDay={onDay} /></div>
 
       <div className="card recent-card">
         <div className="card-h">Poslední obchody</div>
@@ -1748,7 +1750,7 @@ function JournalView({ trades, fwById, cur, frameworks, query, setQuery, fwFilte
 }
 
 /* ========================= DAILY JOURNAL ========================= */
-function DailyJournalView({ trades, fwById, cur, notes, onSaveNote, onEditTrade, onAdd, isAdmin }) {
+function DailyJournalView({ trades, fwById, cur, notes, onSaveNote, onEditTrade, onAdd, onChart, focusDay, isAdmin }) {
   const days = useMemo(() => {
     const map = {};
     trades.forEach((t) => { const k = dayKey(t.date); if (!k) return; (map[k] = map[k] || []).push(t); });
@@ -1773,7 +1775,8 @@ function DailyJournalView({ trades, fwById, cur, notes, onSaveNote, onEditTrade,
       <PeriodBar preset={preset} from={from} to={to} size={size} onPreset={setPresetR} onFrom={setFromR} onTo={setToR} onSize={setSizeR} unit="dní" />
       {pageItems.map((d) => (
         <DayCard key={d.key} dk={d.key} trades={d.trades} fwById={fwById} cur={cur}
-          note={notes[d.key] || ""} onSaveNote={onSaveNote} onEditTrade={onEditTrade} onAdd={onAdd} isAdmin={isAdmin} />
+          note={notes[d.key] || ""} onSaveNote={onSaveNote} onEditTrade={onEditTrade} onAdd={onAdd}
+          onChart={onChart} focusDay={focusDay} isAdmin={isAdmin} />
       ))}
       <Pager total={filtered.length} size={size} page={page} onPage={setPage} unit="dní" />
     </div>
@@ -1796,10 +1799,18 @@ const DAY_TEMPLATE =
 📝 Recap dne:
 - `;
 
-function DayCard({ dk, trades, fwById, cur, note, onSaveNote, onEditTrade, onAdd, isAdmin }) {
+function DayCard({ dk, trades, fwById, cur, note, onSaveNote, onEditTrade, onAdd, onChart, focusDay, isAdmin }) {
   const [draft, setDraft] = useState(note);
-  const [open, setOpen] = useState(dk === new Date().toISOString().slice(0, 10));
+  const [open, setOpen] = useState(dk === new Date().toISOString().slice(0, 10) || dk === focusDay);
+  const cardRef = useRef(null);
   useEffect(() => { setDraft(note); }, [note]);
+  useEffect(() => {
+    if (!focusDay || dk !== focusDay) return;
+    setOpen(true);
+    if (cardRef.current && cardRef.current.scrollIntoView) {
+      try { cardRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) { }
+    }
+  }, [focusDay, dk]);
 
   const s = computeStats(trades);
   const dt = new Date(dk + "T00:00:00");
@@ -1810,7 +1821,7 @@ function DayCard({ dk, trades, fwById, cur, note, onSaveNote, onEditTrade, onAdd
   const ordered = [...trades].sort((a, b) => new Date(a.date) - new Date(b.date));
 
   return (
-    <div className={`card day-card2 ${open ? "open" : ""}`}>
+    <div ref={cardRef} className={`card day-card2 ${open ? "open" : ""} ${focusDay === dk ? "focused" : ""}`}>
       <div className="day-head2" onClick={() => setOpen((o) => !o)}>
         <span className="day-chev">›</span>
         <div className="day-when">
@@ -1843,6 +1854,7 @@ function DayCard({ dk, trades, fwById, cur, note, onSaveNote, onEditTrade, onAdd
                   <span className="dt-fw">{f ? <><i className="fdot" style={{ background: f.color }} />{f.name}</> : ""}</span>
                   <span className={`dt-r ${r === null ? "mut" : r >= 0 ? "pos" : "neg"}`}>{r === null ? "" : `${r >= 0 ? "+" : ""}${fmtNum(r, 1)}R`}</span>
                   <span className={`dt-pnl ${p >= 0 ? "pos" : "neg"}`}>{fmtMoney(p, cur)}</span>
+                  <button className="dt-chart" title="Graf" onClick={(e) => { e.stopPropagation(); onChart && onChart(t); }}><BarChart3 size={14} /></button>
                 </div>
               );
             })}
@@ -2393,7 +2405,10 @@ function CalendarView({ trades, cur, notes = {}, onDay }) {
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
   while (cells.length % 7 !== 0) cells.push(null);
   const weeks = [];
-  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  for (let i = 0; i < cells.length; i += 7) {
+    const w = cells.slice(i, i + 7);
+    if (w.some((x) => x)) weeks.push(w);      // prázdný týden se nekreslí
+  }
 
   const monthDays = Object.entries(byDay).filter(([k]) => k.startsWith(`${ref.y}-${String(ref.m + 1).padStart(2, "0")}`));
   const monthTotal = monthDays.reduce((a, [, v]) => a + (mode === "R" ? v.r : v.pnl), 0);
@@ -3274,6 +3289,10 @@ function Style() {
 .dash-cal .cal-head{margin-bottom:10px;}
 .dash-cal .cal-dow{font-size:10px;}
 
+.dt-chart{margin-left:10px;width:26px;height:26px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--soft);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;}
+.dt-chart:hover{border-color:var(--gold);color:var(--navy);}
+.day-card2.focused{box-shadow:0 0 0 2px var(--gold-soft);}
+
 /* ===== Kompaktní P&L kalendář (cal2) ===== */
 .cal2{padding:16px 18px;}
 .cal2-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
@@ -3293,7 +3312,7 @@ function Style() {
 .cal2-dow{font-size:11px;font-weight:600;color:#A6ABB8;text-align:center;padding:2px 0;}
 .cal2-dow.wk{color:#8A6D1E;}
 .cal2-cell{height:100%;border:1px solid var(--line2);border-radius:9px;padding:6px 7px;position:relative;background:#fff;display:flex;flex-direction:column;}
-.cal2-cell.empty{background:#FAFBFC;border-color:transparent;}
+.cal2-cell.empty{background:transparent;border-color:transparent;pointer-events:none;}
 .cal2-cell.we{background:#FAFBFC;}
 .cal2-cell.clk{cursor:pointer;}
 .cal2-cell.clk:hover{box-shadow:0 0 0 2px var(--gold-soft) inset;}
