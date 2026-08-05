@@ -3,6 +3,9 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+export const maxDuration = 60;      // víc času na zápis (proti timeoutům)
+export const dynamic = "force-dynamic";
+
 const num = (v) => { const n = parseFloat(v); return isFinite(n) ? n : null; };
 
 // kořen symbolu: "6A 09-26" -> "6A", "MESU6@CME" -> "MESU6" (obchody řeší root jinde)
@@ -63,13 +66,33 @@ export async function POST(req) {
   if (!rows.length) return NextResponse.json({ error: "no valid bars" }, { status: 400 });
 
   const data = rows.map((b) => ({ symbol, root, time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));
-  let inserted = 0;
-  const CHUNK = 1000;
-  for (let i = 0; i < data.length; i += CHUNK) {
-    const res = await prisma.bar.createMany({ data: data.slice(i, i + CHUNK), skipDuplicates: true });
-    inserted += res.count;
+
+  try {
+    let inserted = 0;
+    const CHUNK = 500;
+    for (let i = 0; i < data.length; i += CHUNK) {
+      const res = await createManyRetry(data.slice(i, i + CHUNK));
+      inserted += res.count;
+    }
+    return NextResponse.json({ ok: true, symbol, root, received: rows.length, inserted });
+  } catch (e) {
+    // databáze momentálně přetížená → řekni klientovi, ať to zkusí za chvíli znovu
+    return NextResponse.json({ error: "db busy", detail: String(e && e.message || e) }, { status: 503 });
   }
-  return NextResponse.json({ ok: true, symbol, root, received: rows.length, inserted });
+}
+
+// zápis s opakováním – přežije krátké výpadky/zahlcení Neonu
+async function createManyRetry(chunk) {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await prisma.bar.createMany({ data: chunk, skipDuplicates: true });
+    } catch (e) {
+      attempt++;
+      if (attempt >= 5) throw e;
+      await new Promise((r) => setTimeout(r, 400 * attempt));
+    }
+  }
 }
 
 // GET /api/bars?stats=1                      → přehled (kolik barů, jaké symboly) pro ověření
