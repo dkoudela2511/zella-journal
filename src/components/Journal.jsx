@@ -912,7 +912,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
               onEditNote={(n) => setEditingNote({ ...n })} onDeleteNote={deleteNbNote}
               onNewFolder={() => setEditingFolder(blankFolder())} onEditFolder={(f) => setEditingFolder({ ...f })} />
           )
-          : view === "calendar" ? <CalendarView trades={realTrades} cur={cur} />
+          : view === "calendar" ? <CalendarView trades={realTrades} cur={cur} notes={dailyNotes} onDay={() => setView("dailyjournal")} />
           : view === "reports" ? <ReportsView trades={realTrades} frameworks={frameworks} fwById={fwById} cur={cur} />
           : view === "frameworks" ? <FrameworksView frameworks={frameworks} trades={accountTrades} cur={cur}
               onNew={() => setEditingFw(blankFw())} onEdit={(f) => setEditingFw({ ...f })} onDelete={deleteFramework} />
@@ -1933,65 +1933,90 @@ function RulesForm({ initial, onSave, onCancel }) {
 }
 
 /* ========================= CALENDAR ========================= */
-function CalendarView({ trades, cur }) {
+function CalendarView({ trades, cur, notes = {}, onDay }) {
   const [ref, setRef] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [mode, setMode] = useState("$");
   const byDay = useMemo(() => {
     const map = {};
-    trades.forEach((t) => { const k = dayKey(t.date); if (!k) return; (map[k] = map[k] || { pnl: 0, n: 0 }); map[k].pnl += computePnl(t); map[k].n++; });
+    trades.forEach((t) => {
+      const k = dayKey(t.date); if (!k) return;
+      const m = (map[k] = map[k] || { pnl: 0, n: 0, r: 0, rc: 0 });
+      m.pnl += computePnl(t); m.n++;
+      const r = computeR(t); if (r !== null) { m.r += r; m.rc++; }
+    });
     return map;
   }, [trades]);
 
   const first = new Date(ref.y, ref.m, 1);
-  const startOffset = (first.getDay() + 6) % 7; // pondělí = 0
+  const startOffset = (first.getDay() + 6) % 7;
   const daysInMonth = new Date(ref.y, ref.m + 1, 0).getDate();
   const cells = [];
   for (let i = 0; i < startOffset; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
   while (cells.length % 7 !== 0) cells.push(null);
-
   const weeks = [];
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
-  const monthTotal = Object.entries(byDay).filter(([k]) => k.startsWith(`${ref.y}-${String(ref.m + 1).padStart(2, "0")}`))
-    .reduce((a, [, v]) => a + v.pnl, 0);
+  const monthDays = Object.entries(byDay).filter(([k]) => k.startsWith(`${ref.y}-${String(ref.m + 1).padStart(2, "0")}`));
+  const monthTotal = monthDays.reduce((a, [, v]) => a + (mode === "R" ? v.r : v.pnl), 0);
+  const tradingDays = monthDays.filter(([, v]) => v.n > 0).length;
 
   const move = (delta) => setRef((r) => { const d = new Date(r.y, r.m + delta, 1); return { y: d.getFullYear(), m: d.getMonth() }; });
   const monthName = first.toLocaleString("cs-CZ", { month: "long", year: "numeric" });
+  const valStr = (v) => mode === "R" ? (v.rc > 0 ? `${v.r >= 0 ? "+" : ""}${fmtNum(v.r, 1)}R` : "—") : fmtCompact(v.pnl, cur);
 
   return (
-    <div className="card cal-card">
-      <div className="cal-head">
-        <div className="cal-nav">
-          <button onClick={() => move(-1)}><ChevronLeft size={18} /></button>
-          <span className="cal-title">{monthName}</span>
-          <button onClick={() => move(1)}><ChevronRight size={18} /></button>
+    <div className="card cal2">
+      <div className="cal2-head">
+        <div className="cal2-nav">
+          <button onClick={() => move(-1)}><ChevronLeft size={17} /></button>
+          <span className="cal2-title">{monthName}</span>
+          <button onClick={() => move(1)}><ChevronRight size={17} /></button>
         </div>
-        <div className={`cal-total ${monthTotal >= 0 ? "pos" : "neg"}`}>{fmtMoney(monthTotal, cur)}</div>
+        <div className="cal2-sp" />
+        <div className={`cal2-total ${monthTotal >= 0 ? "pos" : "neg"}`}>{mode === "R" ? `${monthTotal >= 0 ? "+" : ""}${fmtNum(monthTotal, 1)}R` : fmtMoney(monthTotal, cur)}</div>
+        <div className="cal2-days">· {tradingDays} obch. {tradingDays === 1 ? "den" : tradingDays >= 2 && tradingDays <= 4 ? "dny" : "dní"}</div>
+        <div className="cal2-tgl">
+          <button className={mode === "$" ? "on" : ""} onClick={() => setMode("$")}>$</button>
+          <button className={mode === "R" ? "on" : ""} onClick={() => setMode("R")}>R</button>
+        </div>
       </div>
-      <div className="cal-grid head">{["Po", "Út", "St", "Čt", "Pá", "So", "Ne"].map((d) => <div key={d} className="cal-dow">{d}</div>)}</div>
-      {weeks.map((w, wi) => {
-        const wTotal = w.reduce((a, d) => a + (d && byDay[cellKey(ref, d)] ? byDay[cellKey(ref, d)].pnl : 0), 0);
-        const wTrades = w.reduce((a, d) => a + (d && byDay[cellKey(ref, d)] ? byDay[cellKey(ref, d)].n : 0), 0);
-        return (
-          <div className="cal-grid" key={wi}>
-            {w.map((d, di) => {
-              if (!d) return <div className="cal-cell empty-cell" key={di} />;
-              const data = byDay[cellKey(ref, d)];
-              const tone = data ? (data.pnl > 0 ? "pos" : data.pnl < 0 ? "neg" : "flat") : "";
-              return (
-                <div className={`cal-cell ${tone}`} key={di}>
-                  <span className="cal-d">{d}</span>
-                  {data && <><span className="cal-pnl">{fmtCompact(data.pnl, cur)}</span><span className="cal-n">{data.n} {pluralObchod(data.n)}</span></>}
-                </div>
-              );
-            })}
-            <div className={`cal-cell week ${wTotal >= 0 ? "pos" : "neg"}`}>
-              <span className="cal-wl">Týden</span>
-              {wTrades > 0 ? <><span className="cal-pnl">{fmtCompact(wTotal, cur)}</span><span className="cal-n">{wTrades} {pluralObchod(wTrades)}</span></> : <span className="cal-n">—</span>}
-            </div>
-          </div>
-        );
-      })}
+
+      <div className="cal2-grid">
+        {["Po", "Út", "St", "Čt", "Pá", "So", "Ne"].map((d) => <div key={d} className="cal2-dow">{d}</div>)}
+        <div className="cal2-dow wk">Týden</div>
+
+        {weeks.map((w, wi) => {
+          const wPnl = w.reduce((a, d) => a + (d && byDay[cellKey(ref, d)] ? (mode === "R" ? byDay[cellKey(ref, d)].r : byDay[cellKey(ref, d)].pnl) : 0), 0);
+          const wDays = w.filter((d) => d && byDay[cellKey(ref, d)] && byDay[cellKey(ref, d)].n > 0).length;
+          return (
+            <React.Fragment key={wi}>
+              {w.map((d, di) => {
+                if (!d) return <div className="cal2-cell empty" key={di} />;
+                const key = cellKey(ref, d);
+                const data = byDay[key];
+                const weekend = di >= 5;
+                const tone = data ? (data.pnl > 0 ? "win" : data.pnl < 0 ? "loss" : "flat") : "";
+                const hasNote = !!(notes[key] && String(notes[key]).trim());
+                const clickable = onDay && data;
+                return (
+                  <div className={`cal2-cell ${tone} ${weekend ? "we" : ""} ${clickable ? "clk" : ""}`} key={di} onClick={() => clickable && onDay(key)}>
+                    <span className="cal2-dn">{d}</span>
+                    {hasNote && <span className="cal2-note" title="Máš poznámku k tomuto dni" />}
+                    {data && <><span className={`cal2-pnl ${data.pnl >= 0 ? "pos" : "neg"}`}>{valStr(data)}</span><span className="cal2-n">{data.n} {pluralObchod(data.n)}</span></>}
+                  </div>
+                );
+              })}
+              <div className="cal2-week">
+                <span className="cal2-wl">Týden</span>
+                {wDays > 0
+                  ? <><span className={`cal2-wp ${wPnl >= 0 ? "pos" : "neg"}`}>{mode === "R" ? `${wPnl >= 0 ? "+" : ""}${fmtNum(wPnl, 1)}R` : fmtCompact(wPnl, cur)}</span><span className="cal2-wd">{wDays} {wDays === 1 ? "den" : wDays >= 2 && wDays <= 4 ? "dny" : "dní"}</span></>
+                  : <span className="cal2-wp zero">—</span>}
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -2808,6 +2833,49 @@ function Style() {
 .dash-cal .cal-wl{font-size:8.5px;}
 .dash-cal .cal-head{margin-bottom:10px;}
 .dash-cal .cal-dow{font-size:10px;}
+
+/* ===== Kompaktní P&L kalendář (cal2) ===== */
+.cal2{padding:16px 18px;}
+.cal2-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+.cal2-nav{display:flex;align-items:center;gap:8px;}
+.cal2-nav button{width:30px;height:30px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--soft);display:flex;align-items:center;justify-content:center;cursor:pointer;}
+.cal2-nav button:hover{border-color:var(--gold);color:var(--text);}
+.cal2-title{font-size:16px;font-weight:700;color:var(--text);text-transform:capitalize;min-width:118px;text-align:center;}
+.cal2-sp{flex:1;}
+.cal2-total{font-size:15px;font-weight:800;}
+.cal2-total.pos{color:var(--pos);}.cal2-total.neg{color:var(--neg);}
+.cal2-days{font-size:12px;color:var(--muted);}
+.cal2-tgl{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-left:6px;}
+.cal2-tgl button{font-size:12px;font-weight:700;padding:6px 11px;color:var(--soft);cursor:pointer;background:#fff;border:none;font-family:inherit;}
+.cal2-tgl button.on{background:var(--navy);color:#fff;}
+.cal2-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr)) minmax(64px,84px);gap:5px;}
+.cal2-dow{font-size:11px;font-weight:600;color:#A6ABB8;text-align:center;padding:2px 0;}
+.cal2-dow.wk{color:#8A6D1E;}
+.cal2-cell{min-height:74px;border:1px solid var(--line2);border-radius:9px;padding:6px 7px;position:relative;background:#fff;display:flex;flex-direction:column;}
+.cal2-cell.empty{background:#FAFBFC;border-color:transparent;}
+.cal2-cell.we{background:#FAFBFC;}
+.cal2-cell.clk{cursor:pointer;}
+.cal2-cell.clk:hover{box-shadow:0 0 0 2px var(--gold-soft) inset;}
+.cal2-cell.win{background:#E9F7F1;border-color:#CFEEE1;}
+.cal2-cell.loss{background:#FDECEC;border-color:#F6D6D6;}
+.cal2-dn{font-size:11px;font-weight:600;color:#A6ABB8;}
+.cal2-cell.win .cal2-dn{color:#16A06A;}
+.cal2-cell.loss .cal2-dn{color:#E0414A;}
+.cal2-note{position:absolute;top:7px;right:7px;width:6px;height:6px;border-radius:50%;background:var(--gold);}
+.cal2-pnl{font-size:14px;font-weight:800;margin-top:auto;}
+.cal2-pnl.pos{color:#0F6E56;}.cal2-pnl.neg{color:#A32D2D;}
+.cal2-n{font-size:10px;color:var(--muted);}
+.cal2-week{min-height:74px;background:#F7F5EE;border:1px solid #ECE4CE;border-radius:9px;padding:7px;display:flex;flex-direction:column;justify-content:center;}
+.cal2-wl{font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#8A6D1E;}
+.cal2-wp{font-size:14px;font-weight:800;margin-top:3px;}
+.cal2-wp.pos{color:#0F6E56;}.cal2-wp.neg{color:#A32D2D;}.cal2-wp.zero{color:#C4C9D4;}
+.cal2-wd{font-size:9.5px;color:#B09A5E;margin-top:1px;}
+.dash-cal .cal2{padding:14px 16px;}
+.dash-cal .cal2-cell,.dash-cal .cal2-week{min-height:54px;}
+.dash-cal .cal2-pnl,.dash-cal .cal2-wp{font-size:11.5px;}
+.dash-cal .cal2-n,.dash-cal .cal2-wd{font-size:8.5px;}
+.dash-cal .cal2-title{font-size:14px;min-width:92px;}
+@media(max-width:560px){ .cal2-grid{grid-template-columns:repeat(7,minmax(0,1fr)) minmax(52px,64px);gap:3px;} .cal2-cell,.cal2-week{min-height:58px;} .cal2-pnl,.cal2-wp{font-size:12px;} }
 .score-card{grid-area:score;}
 .kpis{grid-area:kpis;display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:14px;}
 .equity-card{grid-area:equity;padding-bottom:14px;}
