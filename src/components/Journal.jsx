@@ -171,24 +171,69 @@ function atasDate(raw) {
   const d = new Date(s.replace(" ", "T"));
   return isNaN(d) ? null : d;
 }
+// ATAS nemá jméno vstupního příkazu, ale má znaménkové objemy → poskládáme obchody
+// metodou "flat to flat": pozice se zvedne z nuly = začátek obchodu, vrátí se na nulu = konec.
 function groupAtasTrades(rows) {
-  return (rows || []).map((r) => {
-    const vol = atasNum(r["Open volume"]);
-    const dir = vol < 0 ? "short" : "long";
-    const qty = Math.abs(vol) || Math.abs(atasNum(r["Close volume"]));
-    const d = atasDate(r["Open time"]);
+  const byKey = {};
+  (rows || []).forEach((r, i) => {
+    const instr = String(r["Instrument"] || "").trim();
+    const account = String(r["Account"] || "").trim();
+    const oT = atasDate(r["Open time"]);
+    if (!instr || !oT) return;
+    const cT = atasDate(r["Close time"]) || oT;
+    const k = account + "|" + instr;
+    (byKey[k] = byKey[k] || []).push({ i, r, oT, cT });
+  });
+
+  const groups = [];
+  Object.keys(byKey).forEach((k) => {
+    const ev = [];
+    byKey[k].forEach((it) => {
+      ev.push({ t: it.oT.getTime(), pr: 0, vol: atasNum(it.r["Open volume"]), it });
+      ev.push({ t: it.cT.getTime(), pr: 1, vol: atasNum(it.r["Close volume"]), it });
+    });
+    ev.sort((a, b) => (a.t - b.t) || (a.pr - b.pr) || (a.it.i - b.it.i));
+    let pos = 0, cur = [];
+    ev.forEach((e) => {
+      if (pos === 0) cur = [];
+      pos = round(pos + e.vol, 6);
+      if (cur.indexOf(e.it) < 0) cur.push(e.it);
+      if (pos === 0 && cur.length) { groups.push(cur); cur = []; }
+    });
+    if (cur.length) groups.push(cur);
+  });
+
+  return groups.map((grp) => {
+    let qty = 0, entrySum = 0, exitSum = 0, exitQty = 0, pnl = 0, volSum = 0;
+    let first = null, last = null, instr = "", account = "";
+    grp.forEach(({ r, oT, cT }) => {
+      const ov = atasNum(r["Open volume"]);
+      const cv = Math.abs(atasNum(r["Close volume"]));
+      const q = Math.abs(ov) || cv;
+      volSum += ov;
+      qty += q;
+      entrySum += atasNum(r["Open price"]) * q;
+      exitSum += atasNum(r["Close price"]) * (cv || q);
+      exitQty += (cv || q);
+      pnl += atasNum(r["PnL"]);
+      if (!first || oT < first) first = oT;
+      if (!last || cT > last) last = cT;
+      if (!instr) { instr = r["Instrument"]; account = String(r["Account"] || "").trim(); }
+    });
+    const entry = qty ? round(entrySum / qty, 8) : 0;
+    const exit = exitQty ? round(exitSum / exitQty, 8) : 0;
     return {
-      account: String(r["Account"] || "").trim(),
-      symbol: atasSymbol(r["Instrument"]),
-      direction: dir,
+      account,
+      symbol: atasSymbol(instr),
+      direction: volSum < 0 ? "short" : "long",
       quantity: qty ? String(qty) : "",
-      entryPrice: (r["Open price"] != null && r["Open price"] !== "") ? String(r["Open price"]) : "",
-      exitPrice: (r["Close price"] != null && r["Close price"] !== "") ? String(r["Close price"]) : "",
-      date: d,
+      entryPrice: entry ? String(entry) : "",
+      exitPrice: exit ? String(exit) : "",
+      date: first,
       fees: "0",
       mae: "",
       mfe: "",
-      pnl: String(round(atasNum(r["PnL"]), 2)),
+      pnl: String(round(pnl, 2)),
       strategy: "",
     };
   }).filter((g) => g.symbol && (g.entryPrice || g.exitPrice));
