@@ -137,6 +137,7 @@ function groupNinjaTrades(rows) {
       entryPrice: entry ? String(entry) : "",
       exitPrice: g.qty ? String(round(g.exitSum / g.qty, 8)) : "",
       date: parseNinjaDate(g.entryTime),
+      exitDate: parseNinjaDate(g.exitTime),
       fees: String(round(g.fees, 2)),
       mae: String(round(g.mae, 2)),
       mfe: String(round(g.mfe, 2)),
@@ -230,6 +231,7 @@ function groupAtasTrades(rows) {
       entryPrice: entry ? String(entry) : "",
       exitPrice: exit ? String(exit) : "",
       date: first,
+      exitDate: last,
       fees: "0",
       mae: "",
       mfe: "",
@@ -261,48 +263,301 @@ function tvSymbol(raw) {
   return s;                                       // akcie – TradingView si poradí (AAPL, TSLA…)
 }
 
-function ChartModal({ symbol, date, onClose }) {
-  const ref = useRef(null);
+/* ---------- vlastní svíčkový graf z vlastních barů (/api/bars) ---------- */
+// Čas obchodu i čas baru jsou "wall-clock" (to, co bylo vidět v Ninji). Bary jsou
+// v DB uložené jako UTC složky téhož wall-clocku, takže se čte přes getUTC*.
+function wallToMs(s) {
+  if (!s) return null;
+  const m = String(s).trim().match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return null;
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+}
+const p2 = (n) => String(n).padStart(2, "0");
+const barClock = (ms) => { const d = new Date(ms); return p2(d.getUTCHours()) + ":" + p2(d.getUTCMinutes()); };
+const barDay = (ms) => { const d = new Date(ms); return p2(d.getUTCDate()) + "." + p2(d.getUTCMonth() + 1) + "."; };
+
+function priceDecimals(bars) {
+  let dec = 0;
+  for (let i = 0; i < Math.min(bars.length, 120); i++) {
+    const s = String(bars[i].c);
+    const k = s.indexOf(".");
+    if (k >= 0) dec = Math.max(dec, s.length - k - 1);
+  }
+  return Math.min(Math.max(dec, 1), 6);
+}
+
+// V okně může být víc kontraktů jednoho rootu (rollover). Vybereme ten,
+// do jehož cenového rozpětí padne vstupní cena obchodu.
+function pickContract(rawBars, entryPrice) {
+  const by = {};
+  rawBars.forEach((b) => { (by[b.symbol] = by[b.symbol] || []).push(b); });
+  const names = Object.keys(by);
+  if (!names.length) return { symbol: "", bars: [] };
+  if (names.length === 1) return { symbol: names[0], bars: by[names[0]] };
+  const ep = parseFloat(entryPrice);
+  let best = names[0], bestScore = Infinity;
+  names.forEach((n) => {
+    const arr = by[n];
+    let lo = Infinity, hi = -Infinity;
+    arr.forEach((b) => { if (b.low < lo) lo = b.low; if (b.high > hi) hi = b.high; });
+    let d = 0;
+    if (isFinite(ep)) d = ep < lo ? lo - ep : ep > hi ? ep - hi : 0;
+    const score = d * 1e6 - arr.length;          // primárně trefa cenou, pak víc barů
+    if (score < bestScore) { bestScore = score; best = n; }
+  });
+  return { symbol: best, bars: by[best] };
+}
+
+function ChartModal({ trade, onClose }) {
+  const symbol = (trade && trade.symbol) || "";
+  const wrapRef = useRef(null);
+  const cvRef = useRef(null);
+  const tvRef = useRef(null);
+  const [src, setSrc] = useState("own");          // "own" | "tv"
+  const [bars, setBars] = useState([]);
+  const [contract, setContract] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [size, setSize] = useState({ w: 900, h: 420 });
+  const [hover, setHover] = useState(null);
+
+  const entryMs = wallToMs(trade && trade.date);
+  const exitMs = wallToMs(trade && trade.exitDate);
+  const entryP = parseFloat(trade && trade.entryPrice);
+  const exitP = parseFloat(trade && trade.exitPrice);
+  const isShort = (trade && trade.direction) === "short";
+
+  // načtení barů
   useEffect(() => {
-    const host = ref.current;
-    if (!host) return;
+    let dead = false;
+    const root = String(symbol || "").trim().toUpperCase();
+    if (!root || !entryMs) { setLoading(false); setErr("Obchod nemá symbol nebo datum."); return; }
+    const end = exitMs && exitMs > entryMs ? exitMs : entryMs + 60 * 60000;
+    const span = end - entryMs;
+    const pad = Math.max(45 * 60000, Math.round(span * 0.6));
+    const from = new Date(entryMs - pad).toISOString();
+    const to = new Date(end + pad).toISOString();
+    setLoading(true); setErr("");
+    fetch(`/api/bars?root=${encodeURIComponent(root)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (dead) return;
+        const raw = Array.isArray(d && d.bars) ? d.bars : [];
+        if (!raw.length) { setBars([]); setErr(`Pro ${root} nemám v tomhle období bary.`); setLoading(false); return; }
+        const picked = pickContract(raw, trade.entryPrice);
+        const list = picked.bars
+          .map((b) => ({ t: Date.parse(b.time), o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume || 0 }))
+          .filter((b) => isFinite(b.t))
+          .sort((a, b) => a.t - b.t);
+        setContract(picked.symbol);
+        setBars(list);
+        setLoading(false);
+      })
+      .catch((e) => { if (!dead) { setErr("Bary se nepodařilo načíst: " + String(e && e.message || e)); setLoading(false); } });
+    return () => { dead = true; };
+  }, [symbol, trade && trade.date, trade && trade.exitDate]);
+
+  // rozměry plátna
+  useEffect(() => {
+    const el = wrapRef.current; if (!el) return;
+    const upd = () => setSize({ w: el.clientWidth || 900, h: el.clientHeight || 420 });
+    upd();
+    if (typeof ResizeObserver === "undefined") { window.addEventListener("resize", upd); return () => window.removeEventListener("resize", upd); }
+    const ro = new ResizeObserver(upd); ro.observe(el);
+    return () => ro.disconnect();
+  }, [src]);
+
+  // kreslení
+  useEffect(() => {
+    const cv = cvRef.current; if (!cv || src !== "own" || !bars.length) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W = size.w, H = size.h;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    cv.style.width = W + "px"; cv.style.height = H + "px";
+    const g = cv.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+
+    const NAVY = "#17386F", GOLD = "#C2A14A", GREEN = "#16A06A", RED = "#E0414A";
+    const LINE = "#E6EAF2", MUT = "#8A97AE", TXT = "#16203A";
+    const ML = 10, MR = 74, MT = 12, MB = 26;
+    const pw = Math.max(20, W - ML - MR), ph = Math.max(20, H - MT - MB);
+    const dec = priceDecimals(bars);
+
+    let lo = Infinity, hi = -Infinity;
+    bars.forEach((b) => { if (b.l < lo) lo = b.l; if (b.h > hi) hi = b.h; });
+    if (isFinite(entryP)) { lo = Math.min(lo, entryP); hi = Math.max(hi, entryP); }
+    if (isFinite(exitP)) { lo = Math.min(lo, exitP); hi = Math.max(hi, exitP); }
+    const padP = (hi - lo) * 0.08 || (hi * 0.001 || 1);
+    lo -= padP; hi += padP;
+
+    const n = bars.length;
+    const slot = pw / n;
+    const xOf = (i) => ML + slot * (i + 0.5);
+    const yOf = (p) => MT + (hi - p) / (hi - lo) * ph;
+    const xAt = (ms) => {
+      if (ms <= bars[0].t) return ML;
+      if (ms >= bars[n - 1].t) return ML + pw;
+      let k = 0; while (k < n - 1 && bars[k + 1].t <= ms) k++;
+      const span = bars[k + 1].t - bars[k].t || 1;
+      return xOf(k) + (ms - bars[k].t) / span * slot;
+    };
+
+    // zóna držení
+    if (isFinite(entryMs) && exitMs && exitMs > entryMs) {
+      const x1 = xAt(entryMs), x2 = xAt(exitMs);
+      g.fillStyle = "rgba(22,160,106,.07)";
+      g.fillRect(x1, MT, Math.max(1, x2 - x1), ph);
+    }
+
+    // mřížka + cenová osa
+    g.font = "11px system-ui, sans-serif"; g.textBaseline = "middle";
+    for (let i = 0; i <= 4; i++) {
+      const p = lo + (hi - lo) * i / 4, y = yOf(p);
+      g.strokeStyle = LINE; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(ML, Math.round(y) + .5); g.lineTo(ML + pw, Math.round(y) + .5); g.stroke();
+      g.fillStyle = MUT; g.textAlign = "left";
+      g.fillText(p.toFixed(dec), ML + pw + 7, y);
+    }
+
+    // svíčky
+    const bw = Math.max(1, Math.min(14, slot * 0.7));
+    bars.forEach((b, i) => {
+      const x = xOf(i), up = b.c >= b.o, col = up ? GREEN : RED;
+      g.strokeStyle = col; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(Math.round(x) + .5, yOf(b.h)); g.lineTo(Math.round(x) + .5, yOf(b.l)); g.stroke();
+      const yTop = yOf(Math.max(b.o, b.c)), hgt = Math.max(1, Math.abs(yOf(b.o) - yOf(b.c)));
+      g.fillStyle = col; g.fillRect(x - bw / 2, yTop, bw, hgt);
+    });
+
+    // vstup / výstup
+    const level = (p, col, label, dash) => {
+      if (!isFinite(p)) return;
+      const y = yOf(p);
+      g.save(); g.setLineDash(dash); g.strokeStyle = col; g.lineWidth = 1.4;
+      g.beginPath(); g.moveTo(ML, y); g.lineTo(ML + pw, y); g.stroke(); g.restore();
+      const txt = label + " " + p.toFixed(dec);
+      g.font = "10.5px system-ui, sans-serif";
+      const tw = g.measureText(txt).width + 10;
+      g.fillStyle = col; g.fillRect(ML + pw + 2, y - 8, Math.min(tw, MR - 4), 16);
+      g.fillStyle = "#fff"; g.textAlign = "left"; g.fillText(txt, ML + pw + 7, y);
+    };
+    level(entryP, NAVY, "V", [3, 3]);
+    level(exitP, GOLD, "X", [3, 3]);
+
+    const marker = (ms, p, col, up) => {
+      if (!ms || !isFinite(p)) return;
+      const x = xAt(ms), y = yOf(p);
+      g.fillStyle = col; g.beginPath();
+      if (up) { g.moveTo(x, y + 7); g.lineTo(x - 6, y + 17); g.lineTo(x + 6, y + 17); }
+      else { g.moveTo(x, y - 7); g.lineTo(x - 6, y - 17); g.lineTo(x + 6, y - 17); }
+      g.closePath(); g.fill();
+    };
+    marker(entryMs, entryP, isShort ? RED : GREEN, !isShort);
+    if (exitMs) marker(exitMs, exitP, GOLD, isShort);
+
+    // časová osa
+    g.strokeStyle = LINE; g.beginPath(); g.moveTo(ML, MT + ph + .5); g.lineTo(ML + pw, MT + ph + .5); g.stroke();
+    g.fillStyle = MUT; g.textAlign = "center"; g.font = "11px system-ui, sans-serif";
+    const ticks = Math.max(2, Math.min(7, Math.floor(pw / 110)));
+    for (let i = 0; i <= ticks; i++) {
+      const idx = Math.min(n - 1, Math.round((n - 1) * i / ticks));
+      g.fillText(barClock(bars[idx].t), xOf(idx), MT + ph + 14);
+    }
+
+    // křížový kurzor
+    if (hover && hover.x > ML && hover.x < ML + pw) {
+      const idx = Math.max(0, Math.min(n - 1, Math.round((hover.x - ML) / slot - 0.5)));
+      const b = bars[idx];
+      g.save(); g.setLineDash([2, 3]); g.strokeStyle = MUT; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(xOf(idx), MT); g.lineTo(xOf(idx), MT + ph); g.stroke();
+      g.beginPath(); g.moveTo(ML, hover.y); g.lineTo(ML + pw, hover.y); g.stroke(); g.restore();
+      const pr = hi - (hover.y - MT) / ph * (hi - lo);
+      g.fillStyle = TXT; g.fillRect(ML + pw + 2, hover.y - 8, MR - 6, 16);
+      g.fillStyle = "#fff"; g.font = "10.5px system-ui, sans-serif"; g.textAlign = "left";
+      g.fillText(pr.toFixed(dec), ML + pw + 7, hover.y);
+      const info = `${barDay(b.t)} ${barClock(b.t)}  O ${b.o.toFixed(dec)}  H ${b.h.toFixed(dec)}  L ${b.l.toFixed(dec)}  C ${b.c.toFixed(dec)}`;
+      g.font = "11px system-ui, sans-serif";
+      const iw = g.measureText(info).width + 14;
+      g.fillStyle = "rgba(255,255,255,.94)"; g.fillRect(ML + 4, MT + 4, iw, 20);
+      g.strokeStyle = LINE; g.strokeRect(ML + 4.5, MT + 4.5, iw, 20);
+      g.fillStyle = TXT; g.fillText(info, ML + 11, MT + 14);
+    }
+  }, [bars, size, src, hover, entryMs, exitMs, entryP, exitP, isShort]);
+
+  // TradingView jako záloha
+  useEffect(() => {
+    if (src !== "tv") return;
+    const host = tvRef.current; if (!host) return;
     host.innerHTML = "";
     const widget = document.createElement("div");
     widget.className = "tradingview-widget-container__widget";
-    widget.style.height = "100%";
-    widget.style.width = "100%";
+    widget.style.height = "100%"; widget.style.width = "100%";
     host.appendChild(widget);
     const script = document.createElement("script");
     script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
     script.async = true;
     script.innerHTML = JSON.stringify({
-      symbol: tvSymbol(symbol),
-      interval: "5",
-      timezone: "Europe/Prague",
-      theme: "light",
-      style: "1",
-      locale: "cs",
-      autosize: true,
-      allow_symbol_change: true,
-      withdateranges: true,
-      hide_side_toolbar: false,
-      calendar: false,
+      symbol: tvSymbol(symbol), interval: "5", timezone: "Europe/Prague", theme: "light",
+      style: "1", locale: "cs", autosize: true, allow_symbol_change: true, withdateranges: true,
+      hide_side_toolbar: false, calendar: false,
     });
     host.appendChild(script);
     return () => { if (host) host.innerHTML = ""; };
-  }, [symbol]);
+  }, [src, symbol]);
+
+  const dayTxt = trade && trade.date ? `${(trade.date || "").slice(8, 10)}. ${(trade.date || "").slice(5, 7)}. ${(trade.date || "").slice(0, 4)}` : "";
 
   return (
     <div className="overlay" onClick={onClose}>
       <div className="sheet chart-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-h">
-          <h3>Graf — {symbol || "?"}{date ? ` · ${(date || "").slice(0, 10)}` : ""}</h3>
+          <h3>
+            Graf — {symbol || "?"}{dayTxt ? ` · ${dayTxt}` : ""}
+            {trade && trade.direction && <span className={`dirtag ${isShort ? "s" : "l"}`}>{isShort ? "SHORT" : "LONG"}</span>}
+          </h3>
           <button className="x" onClick={onClose}><X size={18} /></button>
         </div>
-        <div className="chart-body">
-          <div className="tradingview-widget-container" ref={ref} style={{ height: "100%", width: "100%" }} />
+
+        <div className="chart-bar">
+          <div className="chart-src">
+            <button className={src === "own" ? "on" : ""} onClick={() => setSrc("own")}>Moje data</button>
+            <button className={src === "tv" ? "on" : ""} onClick={() => setSrc("tv")}>TradingView</button>
+          </div>
+          {src === "own" && (
+            <div className="chart-meta">
+              {contract && <span>{contract}</span>}
+              {!!bars.length && <span>{bars.length} min. barů</span>}
+              {trade && trade.exitDate && <span>{barClock(entryMs)} → {barClock(exitMs)}</span>}
+            </div>
+          )}
         </div>
-        <div className="chart-note">Tip: vlevo nahoře v grafu lze změnit symbol i timeframe a posunem se dostaneš na datum svého obchodu. Data dodává TradingView (zdarma).</div>
+
+        <div className="chart-body">
+          {src === "own" ? (
+            <div className="rechart-wrap" ref={wrapRef}
+              onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHover({ x: e.clientX - r.left, y: e.clientY - r.top }); }}
+              onMouseLeave={() => setHover(null)}>
+              <canvas ref={cvRef} />
+              {(loading || err || !bars.length) && (
+                <div className="rechart-msg">
+                  {loading ? "Načítám bary…" : (err || "Žádné bary pro tento obchod.")}
+                  {!loading && (
+                    <button className="btn ghost sm" onClick={() => setSrc("tv")}>Otevřít v TradingView</button>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="tradingview-widget-container" ref={tvRef} style={{ height: "100%", width: "100%" }} />
+          )}
+        </div>
+
+        <div className="chart-note">
+          {src === "own"
+            ? "Svíčky z vlastních minutových barů z NinjaTraderu. Navy čára = vstup, zlatá = výstup, zelený pás = doba držení."
+            : "Data dodává TradingView (zdarma). Symbol i timeframe lze změnit vlevo nahoře."}
+        </div>
       </div>
     </div>
   );
@@ -469,7 +724,7 @@ function fmtDate(iso) {
 function pluralObchod(n) { return n === 1 ? "obchod" : n >= 2 && n <= 4 ? "obchody" : "obchodů"; }
 
 const blankTrade = () => ({
-  id: uid(), date: new Date().toISOString().slice(0, 16), symbol: "", direction: "long",
+  id: uid(), date: new Date().toISOString().slice(0, 16), exitDate: "", symbol: "", direction: "long",
   frameworkId: "", entryPrice: "", exitPrice: "", quantity: "", stopLoss: "", fees: "", pnl: "", notes: "",
   tags: [], mistakes: [], rating: "", reviewed: false, missed: false, ruleChecks: [], mae: "", mfe: "", riskUsd: "",
   accountId: "", shots: [], source: "manual", verified: false,
@@ -793,6 +1048,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       t.symbol = g.symbol; t.direction = g.direction; t.quantity = g.quantity;
       t.entryPrice = g.entryPrice; t.exitPrice = g.exitPrice;
       t.date = g.date ? toLocalInput(g.date) : toLocalInput(new Date());
+      t.exitDate = g.exitDate ? toLocalInput(g.exitDate) : "";
       t.fees = g.fees; t.mae = g.mae; t.mfe = g.mfe; t.pnl = g.pnl;
       t.reviewed = false;
       if (g.strategy) t.frameworkId = getFw(g.strategy);
@@ -831,6 +1087,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       t.symbol = g.symbol; t.direction = g.direction; t.quantity = g.quantity;
       t.entryPrice = g.entryPrice; t.exitPrice = g.exitPrice;
       t.date = g.date ? toLocalInput(g.date) : toLocalInput(new Date());
+      t.exitDate = g.exitDate ? toLocalInput(g.exitDate) : "";
       t.fees = g.fees; t.mae = g.mae; t.mfe = g.mfe; t.pnl = g.pnl;
       if (g.strategy) t.frameworkId = getFw(g.strategy);
       t.source = "imported";
@@ -963,7 +1220,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
               total={accountTrades.length} onEdit={(t) => setEditing({ ...t })} onDelete={deleteTrade}
               onBulkDelete={(ids) => persistT(trades.filter((t) => !ids.includes(t.id)))}
               onImport={() => setEditingImport(true)}
-              onChart={(t) => setChartFor({ symbol: t.symbol, date: t.date })}
+              onChart={(t) => setChartFor(t)}
             />
           )
           : view === "notebook" ? (
@@ -990,7 +1247,7 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       {editing && (
         <TradeForm cur={cur} initial={editing} frameworks={frameworks} accounts={accounts} isAdmin={isAdmin}
           onCancel={() => setEditing(null)} onSave={saveTrade} onCreateFramework={createFramework}
-          onShowChart={(t) => setChartFor({ symbol: t.symbol, date: t.date })} />
+          onShowChart={(t) => setChartFor(t)} />
       )}
       {editingFw && (
         <FrameworkForm initial={editingFw} onCancel={() => setEditingFw(null)} onSave={saveFramework} />
@@ -1013,13 +1270,13 @@ export default function App({ isAdmin = false, enrolled: enrolledProp = false, m
       {editingMTrade && (
         <TradeForm cur={cur} initial={editingMTrade} frameworks={frameworks}
           onCancel={() => setEditingMTrade(null)} onSave={saveMentorTrade} onCreateFramework={createFramework}
-          onShowChart={(t) => setChartFor({ symbol: t.symbol, date: t.date })} />
+          onShowChart={(t) => setChartFor(t)} />
       )}
       {editingMImport && (
         <ImportForm onImport={importCsvToMentor} onImportNinja={importNinjaToMentor} onCancel={() => setEditingMImport(false)} />
       )}
       {chartFor && (
-        <ChartModal symbol={chartFor.symbol} date={chartFor.date} onClose={() => setChartFor(null)} />
+        <ChartModal trade={chartFor} onClose={() => setChartFor(null)} />
       )}
     </div>
   );
@@ -3350,6 +3607,19 @@ function Style() {
 .sm-seg .seg-btn{padding:5px 11px;font-size:12px;}
 
 /* chart modal */
+.chart-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 16px 4px;flex-wrap:wrap;}
+.chart-src{display:flex;gap:4px;}
+.chart-src button{font-size:12px;font-weight:600;padding:5px 11px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer;}
+.chart-src button.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+.chart-meta{display:flex;gap:12px;font-size:11.5px;color:var(--muted);}
+.chart-meta span{white-space:nowrap;}
+.dirtag{margin-left:9px;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:5px;vertical-align:middle;}
+.dirtag.l{background:rgba(22,160,106,.12);color:var(--pos);}
+.dirtag.s{background:rgba(224,65,74,.12);color:var(--neg);}
+.rechart-wrap{position:relative;width:100%;height:100%;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card);cursor:crosshair;}
+.rechart-wrap canvas{display:block;}
+.rechart-msg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-size:13px;color:var(--muted);background:var(--card);text-align:center;padding:20px;}
+
 .sheet-h-act{display:flex;align-items:center;gap:10px;}
 .chart-sheet{width:min(1040px,96vw);max-width:96vw;height:min(80vh,720px);display:flex;flex-direction:column;}
 .chart-body{flex:1;min-height:0;padding:0 14px;}
